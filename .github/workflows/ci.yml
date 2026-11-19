@@ -127,20 +127,41 @@ jobs:
 
       - name: Smoke test the backend image
         run: |
-          docker run -d --name fuel-backend-ci -p 18001:8000 fuel-supply-backend:ci
-          for i in $(seq 1 30); do
+          set -euo pipefail
+          # The backend's /health is a *readiness* probe: it reports 503 while
+          # the simulator or the database are down. So the smoke test brings
+          # up the real dependencies alongside the freshly built image.
+          docker network create fuel-ci-net || true
+
+          docker run -d --name fuel-ci-simulator --network fuel-ci-net \
+            -e SIMULATOR_START_MODE=paused \
+            asifmahmoud414/bup-fuel-supply-simulator:1.0.0
+          docker run -d --name fuel-ci-postgres --network fuel-ci-net \
+            -e POSTGRES_USER=fuel -e POSTGRES_PASSWORD=fuel -e POSTGRES_DB=fuel \
+            postgres:16-alpine
+          docker run -d --name fuel-backend-ci --network fuel-ci-net -p 18001:8000 \
+            -e SIMULATOR_BASE_URL=http://fuel-ci-simulator:8000 \
+            -e DATABASE_URL=postgresql+asyncpg://fuel:fuel@fuel-ci-postgres:5432/fuel \
+            fuel-supply-backend:ci
+
+          for i in $(seq 1 45); do
             if curl -fsS http://127.0.0.1:18001/health > /dev/null 2>&1; then
-              echo "backend healthy"
+              echo "backend healthy after ${i}s"
               curl -fsS http://127.0.0.1:18001/health
-              docker rm -f fuel-backend-ci
-              exit 0
+              echo
+              curl -fsS http://127.0.0.1:18001/api/state | head -c 400
+              echo
+              break
+            fi
+            if [ "$i" -eq 45 ]; then
+              echo "backend did not become healthy"
+              docker logs fuel-backend-ci
+              exit 1
             fi
             sleep 2
           done
-          echo "backend did not become healthy"
-          docker logs fuel-backend-ci
-          docker rm -f fuel-backend-ci
-          exit 1
+
+          docker rm -f fuel-backend-ci fuel-ci-simulator fuel-ci-postgres
 
   compose-config:
     name: Validate docker-compose

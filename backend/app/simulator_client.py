@@ -313,9 +313,19 @@ class SimulatorClient:
 
     # -- health ------------------------------------------------------------
 
-    async def health(self) -> HealthResponse:
-        """GET /v1/health — liveness probe, bypasses fault injection."""
-        result = await self._request("GET", "/v1/health", model=HealthResponse)
+    async def health(self, *, fast: bool = False) -> HealthResponse:
+        """GET /v1/health — liveness probe, bypasses fault injection.
+
+        ``fast=True`` skips the retry loop, so a health probe fails fast
+        instead of spending its whole budget backing off against a dependency
+        that is down.
+        """
+        result = await self._request(
+            "GET",
+            "/v1/health",
+            model=HealthResponse,
+            max_retries=0 if fast else None,
+        )
         assert isinstance(result, HealthResponse)
         return result
 

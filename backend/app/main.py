@@ -117,7 +117,10 @@ def get_database(request: Request) -> Database:
 async def _simulator_health(client: SimulatorClient) -> dict[str, Any]:
     """Check the simulator liveness endpoint (fault-immune by design)."""
     try:
-        health = await client.health()
+        # ``fast`` keeps the probe inside the health-check timeout: when the
+        # simulator is down, backing off and retrying only delays the answer
+        # the orchestrator is waiting for.
+        health = await client.health(fast=True)
     except (SimulatorConnectionError, SimulatorTimeoutError) as exc:
         return {"status": "unreachable", "error": str(exc)}
     except SimulatorAPIError as exc:

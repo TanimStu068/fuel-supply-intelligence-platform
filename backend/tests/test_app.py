@@ -19,7 +19,7 @@ class _FakeSimulator:
         """No-op: the fake always reports its configured staleness."""
         return None
 
-    async def health(self):
+    async def health(self, *, fast: bool = False):
         from app.simulator_models import HealthResponse
 
         return HealthResponse.model_validate(
@@ -156,6 +156,19 @@ def client() -> TestClient:
     with TestClient(app) as test_client:
         yield test_client
     app.dependency_overrides.clear()
+
+
+def test_app_module_imports_cleanly() -> None:
+    """Guard against a stale-import regression.
+
+    A dangling import in a module that the test suite never exercises at
+    import time would only surface when the image boots in CI. Importing the
+    app here makes that failure loud and immediate.
+    """
+    import importlib
+
+    module = importlib.import_module("app.main")
+    assert module.app is not None
 
 
 def test_health_reports_all_components(client: TestClient) -> None:
