@@ -166,6 +166,17 @@ ruff check .
 ruff format --check .
 ```
 
+The cross-service suite needs the stack running:
+
+```bash
+docker compose up -d
+pytest tests/ -m integration    # 6 checks against the live simulator
+```
+
+It resolves its target URLs from the environment first, then `.env`, then the
+committed defaults — so it follows a local port remapping instead of hitting
+whatever else owns port 8000.
+
 GitHub Actions runs on every push to `main`: ruff lint + format check, pytest
 with a JUnit report, frontend typecheck + build, both Docker image builds with
 a live backend health check against a real simulator and Postgres, and a
