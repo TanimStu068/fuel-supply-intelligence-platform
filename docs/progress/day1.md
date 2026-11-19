@@ -11,7 +11,7 @@
 |---|---|---|
 | `docker compose up` works | ✅ | 6 services up; `docker compose ps` all healthy |
 | `/health` is green | ✅ | `HTTP 200`, all three components `"ok"` |
-| Tests pass | ✅ | 59 backend unit tests + 6 integration tests |
+| Tests pass | ✅ | 60 backend unit tests + 6 integration tests |
 | CI file exists | ✅ | `.github/workflows/ci.yml` — 5 jobs |
 | Monorepo layout | ✅ | `/backend` `/frontend` `/infra` `/docs` `/scripts` `/tests` + root README |
 | Simulator client, full surface | ✅ | every documented endpoint covered |
@@ -24,7 +24,7 @@
 ### 1. Monorepo
 
 ```
-backend/    FastAPI service, simulator client, 59 unit tests
+backend/    FastAPI service, simulator client, 60 unit tests
 frontend/   React + Vite + TypeScript operator dashboard
 infra/      Prometheus + Grafana provisioning
 docs/       reference PDFs, extracts, simulator notes, this progress log
@@ -156,7 +156,7 @@ docker compose up --build
 | Simulator | http://localhost:8000 (`/admin` console, `/docs`) |
 | Frontend | http://localhost:5173 |
 | Prometheus | http://localhost:9090 |
-| Grafana | http://localhost:33000 → `admin` / `.env` |
+| Grafana | http://localhost:3000 → `admin` / `.env` |
 
 Check it:
 
@@ -210,6 +210,9 @@ discrepancies above, all of which are handled.
   are the standard ports.
 - `docker-compose.yml` reads every port from the environment, so a conflict is
   resolved in `.env` alone.
+- The cross-service suite (`tests/`) resolves its target URLs the same way —
+  environment variable, then `.env`, then the committed default — so it never
+  talks to an unrelated app that happens to own the default port.
 
 ---
 
