@@ -57,20 +57,33 @@ Observe → Detect → Predict → Decide → Simulate → Act → Monitor → R
 
 ## 3. Architecture
 
-```mermaid
-flowchart LR
-    SIM["BUP Fuel Supply Simulator<br/>REST + SSE + admin"] -->|REST polling / SSE hints| SYNC["Sync service"]
-    SYNC --> DB[("Postgres")]
-    SYNC --> INTEL["Intelligence layer<br/>forecast, risk, anomaly"]
-    INTEL --> DEC["Decision engine<br/>constraint-aware allocator"]
-    DB --> API["FastAPI backend"]
-    INTEL --> API
-    DEC --> API
-    API -->|approved allocations| SIM
-    API --> UI["Operator dashboard<br/>React + Vite"]
-    API -->|/metrics| PROM["Prometheus"]
-    PROM --> GRAF["Grafana"]
-```
+┌────────────────────────────────────────────────────────────────────────────┐
+│                      OUR PLATFORM (all in Docker Compose)                  │
+│                                                                            │
+│  ┌──────────────┐      ┌────────────────────────────┐      ┌────────────┐  │
+│  │  Frontend    │      │  FastAPI Backend :8001     │      │ Simulator  │  │
+│  │  React + TS  │◄────►│  /api /health /metrics     │◄────►│ (Organizer)│  │
+│  │  :5173       │      │                            │      │ :8000      │  │
+│  │  Operator UI │      │  ├─ Sync service           │      │ REST + SSE │  │
+│  │              │      │  ├─ Intelligence layer     │      │ + /admin   │  │
+│  │              │      │  ├─ Decision engine        │      │            │  │
+│  └──────────────┘      └─────┬────────────────┬─────┘      └────────────┘  │
+│                              │                │                            │
+│                              ▼                ▼                            │
+│                    ┌────────────────────┐  ┌────────────────────┐          │
+│                    │  Postgres :5432    │  │  Prometheus :9090  │          │
+│                    │  state, history,   │  │  scrapes /metrics  │          │
+│                    │  decisions, audit  │  │                    │          │
+│                    └────────────────────┘  └──┬─────────────────┘          │
+│                                               │                            │
+│                                               ▼                            │
+│                                            ┌────────────────────┐          │
+│                                            │  Grafana :3000     │          │
+│                                            │  dashboards, alerts│          │
+│                                            └────────────────────┘          │
+│                                                                            │
+│  Load tests (k6 / Locust)  ──►  Backend API                                │
+└────────────────────────────────────────────────────────────────────────────┘
 
 Key principles:
 
