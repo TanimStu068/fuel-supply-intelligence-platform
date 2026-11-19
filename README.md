@@ -1,7 +1,7 @@
 # Fuel Supply Intelligence & Resilience Platform
 
 Intelligent decision-support and resilience platform for a simulated fuel supply
-network. Built for the **BUP CSE Fest 2026** Hackathon Finals (in association
+network. (in association
 with Poridhi.io).
 
 > **Status:** Day 1 of 7 complete. Days 2 to 7 are planned below.
