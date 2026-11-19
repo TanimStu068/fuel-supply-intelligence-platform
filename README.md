@@ -57,6 +57,7 @@ Observe → Detect → Predict → Decide → Simulate → Act → Monitor → R
 
 ## 3. Architecture
 
+```text
 ┌────────────────────────────────────────────────────────────────────────────┐
 │                      OUR PLATFORM (all in Docker Compose)                  │
 │                                                                            │
@@ -84,7 +85,7 @@ Observe → Detect → Predict → Decide → Simulate → Act → Monitor → R
 │                                                                            │
 │  Load tests (k6 / Locust)  ──►  Backend API                                │
 └────────────────────────────────────────────────────────────────────────────┘
-
+```
 Key principles:
 
 * **REST is the source of truth, SSE is only a hint.** Every event triggers a
