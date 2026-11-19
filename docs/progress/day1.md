@@ -77,22 +77,42 @@ Behaviour that matters:
 
 ### 5. Tests
 
-59 unit tests with mocked responses (happy path, 503 retry, transport error,
+60 unit tests with mocked responses (happy path, 503 retry, transport error,
 timeout, stale header, malformed payload, every 409 code, both envelope
 shapes) plus 6 cross-service integration tests against the live stack.
 
 ### 6. CI — `.github/workflows/ci.yml`
 
 `lint` (ruff check + format check) → `test` (pytest + JUnit artifact) →
-`docker build` (both images with BuildKit caching, then boots the backend and
-asserts `/health` returns 200) → `compose-config`, with a parallel
-`frontend` job for typecheck and build.
+`docker build` (both images with BuildKit caching, then boots the backend
+against a real simulator and Postgres and asserts `/health` returns 200) →
+`compose-config`, with a parallel `frontend` job for typecheck and build.
+
+**Latest run: all 5 jobs green.** The `docker build` job reports
+`backend healthy after 2s`.
 
 ### 7. Simulator notes
 
 `docs/simulator-notes.md` records what the running image actually does, with
 the raw observations, the root cause in the simulator's own source where
 applicable, and ten documented discrepancies.
+
+---
+
+## Bugs the verification caught
+
+Three defects surfaced during Day 1 that a "does it compile" check would have
+missed. Each is now covered by a test.
+
+| Bug | How it hid | Fix |
+|---|---|---|
+| The backend image **failed to boot** — the client imported a `Fault` model that had been removed | The local suite passed because a stale `__pycache__` entry masked the broken import, and the module was never imported at test time | Fixed the import; added a test that imports `app.main` so a broken import can never pass again |
+| The dashboard showed **"Backend unreachable: Failed to fetch"** | The browser blocked the cross-origin call, and Vite inlines `import.meta.env` at build time so the API URL was frozen into the bundle | Added CORS to the backend; the frontend now resolves the API URL at runtime from `public/config.js`, rewritten by the container entrypoint |
+| The CI smoke test asserted the **wrong thing** | It booted the backend with no simulator and no database, then expected `/health` to return 200 — but `/health` is a *readiness* probe and correctly returns 503 while a dependency is down | The smoke test now starts the simulator and Postgres on a shared network and checks the backend against them |
+
+The second one is the most valuable: the whole stack was "up" and green by
+every automated check, but a judge's browser would have seen an error page.
+The fix was only found by loading the dashboard in an actual browser.
 
 ---
 

@@ -161,14 +161,15 @@ up in [`docs/simulator-notes.md`](docs/simulator-notes.md).
 
 ```bash
 cd backend
-pytest -q          # 59 tests, all simulator responses mocked
+pytest -q          # 60 tests, all simulator responses mocked
 ruff check .
 ruff format --check .
 ```
 
 GitHub Actions runs on every push to `main`: ruff lint + format check, pytest
 with a JUnit report, frontend typecheck + build, both Docker image builds with
-a live backend health check, and a `docker compose config` validation.
+a live backend health check against a real simulator and Postgres, and a
+`docker compose config` validation.
 
 ---
 
