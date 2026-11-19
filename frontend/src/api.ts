@@ -1,7 +1,4 @@
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8001').replace(
-  /\/$/,
-  '',
-)
+import { API_BASE_URL } from './config'
 
 async function getJson<T>(path: string): Promise<T> {
   const response = await fetch(`${API_BASE_URL}${path}`, {
