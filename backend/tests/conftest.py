@@ -45,3 +45,23 @@ def client_factory(settings: Settings):
         return make_client(settings, handler)
 
     return _factory
+
+
+@pytest.fixture(autouse=True)
+def quiet_background_services():
+    """Stop the app's background sync loops from starting in tests.
+
+    The FastAPI lifespan starts the poller and the SSE listener. In a unit
+    test those would try to reach a simulator that does not exist and bury
+    the test output in connection errors, so they are disabled unless a test
+    asks for them explicitly.
+    """
+    from app.config import get_settings
+
+    settings = get_settings()
+    original = settings.sync_enabled
+    settings.sync_enabled = False
+    try:
+        yield
+    finally:
+        settings.sync_enabled = original
