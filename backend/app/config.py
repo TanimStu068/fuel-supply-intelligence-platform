@@ -66,10 +66,22 @@ class Settings(BaseSettings):
     db_pool_max_size: int = Field(default=10, alias="DB_POOL_MAX_SIZE", ge=1)
     db_health_timeout: float = Field(default=3.0, alias="DB_HEALTH_TIMEOUT", gt=0)
 
+    # --- Background sync ----------------------------------------------------
+    sync_enabled: bool = Field(default=True, alias="SYNC_ENABLED")
+    #: Seconds between two REST poll cycles.
+    sync_poll_interval: float = Field(default=5.0, alias="SYNC_POLL_INTERVAL", gt=0)
+    #: Base delay for the SSE reconnect backoff.
+    sse_reconnect_base_delay: float = Field(default=1.0, alias="SSE_RECONNECT_BASE_DELAY", gt=0)
+    #: Ceiling for the SSE reconnect backoff.
+    sse_reconnect_max_delay: float = Field(default=30.0, alias="SSE_RECONNECT_MAX_DELAY", gt=0)
+    #: How many demand observations to pull per ingest cycle.
+    demand_history_limit: int = Field(default=500, alias="DEMAND_HISTORY_LIMIT", gt=0)
+
     # --- Observability -----------------------------------------------------
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
     metrics_enabled: bool = Field(default=True, alias="METRICS_ENABLED")
     metrics_path: str = Field(default="/metrics", alias="METRICS_PATH")
+    log_format: str = Field(default="json", alias="LOG_FORMAT")
 
 
 @lru_cache(maxsize=1)
