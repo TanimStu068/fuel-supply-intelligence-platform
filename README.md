@@ -118,7 +118,7 @@ to `main` and an update to the company.
 | Day | Date | Focus | Status |
 |---|---|---|---|
 | 1 | 19 Nov | Foundation, simulator client, repo and CI skeleton | Done |
-| 2 | 20 Nov | Data layer, live state sync, logging and metrics | Planned |
+| 2 | 20 Nov | Data layer, live state sync, logging and metrics | Done |
 | 3 | 21 Nov | Intelligence layer (forecast, shortage prediction, detection) | Planned |
 | 4 | 22 Nov | Decision engine, recommendations, simulate and act | Planned |
 | 5 | 23 Nov | Operator dashboard | Planned |
@@ -149,27 +149,33 @@ pass, CI file exists.
 
 **Goal:** reliable data ingestion, stored state, and the start of observability.
 
-- [ ] Postgres schema and Alembic migrations: inventory snapshots per tick,
+- [x] Postgres schema and Alembic migrations: inventory snapshots per tick,
       demand history, allocations mirror, events, alerts, decisions, system health
-- [ ] Background sync service: REST polling as source of truth, SSE listener for
+- [x] Background sync service: REST polling as source of truth, SSE listener for
       `/v1/stream` (hint only, re-GET on every event), auto-reconnect with
       backoff, full refetch after reconnect, `stream_disconnect` fault handling
-- [ ] Stale-data handling: invalidate cache on `X-Simulator-Stale: true` and mark
+- [x] Stale-data handling: invalidate cache on `X-Simulator-Stale: true` and mark
       data stale in the API
-- [ ] Incremental `/v1/demand-history` ingest with de-duplication by
+- [x] Incremental `/v1/demand-history` ingest with de-duplication by
       (station, fuel, tick)
-- [ ] Cached-state fallback: serve last-known state with a `degraded` flag and age
+- [x] Cached-state fallback: serve last-known state with a `degraded` flag and age
       if the simulator is unreachable
-- [ ] Structured JSON logging with correlation IDs
-- [ ] Prometheus `/metrics`: request rate, latency histogram, error rate,
+- [x] Structured JSON logging with correlation IDs
+- [x] Prometheus `/metrics`: request rate, latency histogram, error rate,
       simulator call failures, SSE reconnects, stale count, last-sync age
-- [ ] Read APIs: `/api/stations`, `/depots`, `/routes`, `/events`,
+- [x] Read APIs: `/api/stations`, `/depots`, `/routes`, `/events`,
       `/supply-arrivals`, `/history/{station}`
-- [ ] Tests for SSE reconnect, stale handling and degraded mode; real fault test
+- [x] Tests for SSE reconnect, stale handling and degraded mode; real fault test
       via `POST /admin/faults` documented in `docs/fault-tests.md`
 
 **Definition of done:** stop the simulator mid-run and the backend stays up in
 degraded mode, then recovers automatically.
+
+**Verified:** the drill in `scripts/degraded_mode_drill.sh` stops the simulator
+container, watches the platform degrade within 5 s while still serving
+last-known state with an age, then restarts the container and watches it
+recover within 5 s. Ten fault-injection checks pass, and the transcripts are in
+[`docs/fault-tests.md`](docs/fault-tests.md).
 
 ### Day 3 (21 Nov): Intelligence layer
 
@@ -398,6 +404,10 @@ All configuration is environment-driven; **no secret is hard-coded**. Copy
 | `SIMULATOR_RETRY_BASE_DELAY` | `0.2` | Exponential backoff base (seconds) |
 | `DATABASE_URL` | `postgresql+asyncpg://…@postgres:5432/fuel` | Postgres DSN |
 | `LOG_LEVEL` | `INFO` | Backend log level |
+| `SYNC_POLL_INTERVAL` | `5` | Seconds between REST poll cycles |
+| `SSE_RECONNECT_BASE_DELAY` | `1` | SSE reconnect backoff base (seconds) |
+| `SSE_RECONNECT_MAX_DELAY` | `30` | SSE reconnect backoff ceiling (seconds) |
+| `DEMAND_HISTORY_LIMIT` | `500` | Demand rows pulled per ingest cycle |
 | `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | `fuel` / *change-me* / `fuel` | Database credentials |
 
 ---
@@ -470,15 +480,15 @@ checks, all passing; lint clean; CI green.
 
 | # | Deliverable | Where it lives | Status |
 |---|---|---|---|
-| 1 | Working application | `docker compose up` | Skeleton (Day 1), complete by Day 7 |
+| 1 | Working application | `docker compose up` | Skeleton + data layer (Day 1–2), complete by Day 7 |
 | 2 | Source repository | This repo | Ongoing |
 | 3 | Simulator integration | `backend/app/simulator_client.py` | Done (Day 1) |
 | 4 | Intelligence component | `backend/app/intelligence/` | Day 3 |
 | 5 | Operator interface | `frontend/` | Day 5 |
 | 6 | Architecture diagram | Section 3 here, `docs/architecture.md` | Draft here, final Day 7 |
 | 7 | Deployment | `docker-compose.yml`, CI workflow | Compose done, CI/CD final Day 7 |
-| 8 | Observability evidence | Grafana dashboards, `/metrics`, logs | Day 2 and Day 6 |
-| 9 | Resilience demonstration | `docs/resilience-report.md` | Day 6 |
+| 8 | Observability evidence | Grafana dashboards, `/metrics`, JSON logs | Metrics and logs done (Day 2), dashboards Day 6 |
+| 9 | Resilience demonstration | `docs/fault-tests.md`, `docs/resilience-report.md` | Fault tests done (Day 2), full report Day 6 |
 | 10 | Load-test evidence | `docs/load-test-report.md` | Day 6 |
 | 11 | Final demo | `docs/demo-script.md` | Day 7 |
 
