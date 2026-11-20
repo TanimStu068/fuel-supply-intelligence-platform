@@ -24,6 +24,7 @@ import asyncio
 import logging
 import random
 import time
+from collections.abc import AsyncIterator
 from typing import Any, TypeVar
 
 import httpx
@@ -73,6 +74,7 @@ from .simulator_models import (
     Station,
     SupplyArrival,
 )
+from .sse import SSEParser, StreamEvent
 
 logger = logging.getLogger(__name__)
 
@@ -411,6 +413,54 @@ class SimulatorClient:
         result = await self._request("GET", "/v1/metrics", model=Metrics)
         assert isinstance(result, Metrics)
         return result
+
+    # -- SSE stream --------------------------------------------------------
+
+    async def stream(
+        self,
+        *,
+        timeout: float | None = None,
+    ) -> AsyncIterator[StreamEvent]:
+        """Open ``GET /v1/stream`` and yield decoded events.
+
+        The stream is a *hint* channel (guide §6): every event tells the
+        caller that something changed, and the caller re-reads the affected
+        resource over REST. There is no ``Last-Event-ID`` replay, so a
+        reconnect loses whatever happened in between.
+
+        The generator ends when the server closes the connection. A
+        ``stream_disconnect`` fault makes the endpoint answer ``503``
+        immediately, which surfaces as :class:`FaultInjectedError`.
+        """
+        timeout_config = httpx.Timeout(
+            timeout if timeout is not None else self._settings.simulator_request_timeout,
+            connect=self._settings.simulator_connect_timeout,
+            read=None,
+        )
+        parser = SSEParser()
+
+        try:
+            async with self._client.stream(
+                "GET",
+                "/v1/stream",
+                headers={"Accept": "text/event-stream"},
+                timeout=timeout_config,
+            ) as response:
+                if response.status_code != 200:
+                    body = await response.aread()
+                    try:
+                        payload = response.json()
+                    except ValueError:
+                        payload = {"raw": body.decode("utf-8", "replace")}
+                    self._raise_for_error(response, payload)
+
+                async for chunk in response.aiter_text():
+                    for event in parser.feed(chunk):
+                        yield event
+        except httpx.TimeoutException as exc:
+            raise SimulatorTimeoutError(f"timeout on SSE stream: {exc}") from exc
+        except httpx.HTTPError as exc:
+            raise SimulatorConnectionError(f"SSE stream failed: {exc}") from exc
 
     # -- public /v1 writes -------------------------------------------------
 
