@@ -2,8 +2,20 @@
 
 Routes
 ------
-``GET /health``   Component health: backend + simulator + database.
-``GET /api/state`` A consolidated snapshot of the simulated fuel network.
+``GET /health``                        component health + sync status
+``GET /api/state``                     consolidated snapshot of the fuel network
+``GET /api/stations``                  stations, read from the stored state
+``GET /api/depots``                    depots, read from the stored state
+``GET /api/routes``                    routes, read from the stored state
+``GET /api/events``                    domain events, read from the stored state
+``GET /api/supply-arrivals``           scheduled arrivals, read from the stored state
+``GET /api/history/{station_id}``      demand history for one station
+``GET /api/alerts``                    platform-generated alerts
+``GET /metrics``                       Prometheus exposition
+
+Every read path serves the cached state that the background sync service
+keeps fresh. When the simulator is unreachable the API keeps serving
+last-known state and says so, with a ``degraded`` flag and an age.
 """
 
 from __future__ import annotations
@@ -13,13 +25,14 @@ import os
 from contextlib import asynccontextmanager
 from typing import Any
 
-from fastapi import Depends, FastAPI, HTTPException, Request, status
+from fastapi import Depends, FastAPI, HTTPException, Path, Query, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from .config import get_settings
 from .db import Database
 from .db import database as default_database
+from .logging_config import configure_logging
 from .metrics import install_metrics_middleware
 from .simulator_client import SimulatorClient, build_client
 from .simulator_errors import (
@@ -28,22 +41,9 @@ from .simulator_errors import (
     SimulatorTimeoutError,
     SimulatorValidationError,
 )
-from .simulator_models import (
-    Allocation,
-    Depot,
-    Instance,
-    Metrics,
-    Region,
-    Route,
-    SimulatorEvent,
-    Station,
-    SupplyArrival,
-)
+from .state_cache import StateCache
+from .sync_service import SyncService
 
-logging.basicConfig(
-    level=os.getenv("LOG_LEVEL", "INFO").upper(),
-    format="%(asctime)s %(levelname)-8s %(name)s %(message)s",
-)
 logger = logging.getLogger(__name__)
 
 DESCRIPTION = """
@@ -51,20 +51,37 @@ Backend for the **Fuel Supply Intelligence & Resilience Platform**.
 
 It reads the BUP Fuel Supply Simulator over HTTP and exposes a stable,
 validated view of the fuel network for the operator dashboard.
+
+REST is the source of truth and SSE is only a hint that something changed:
+every state this API serves was fetched over REST and validated.
 """
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Open and close the simulator client and database pool."""
+    """Open the simulator client and database, and run the sync service."""
     settings = get_settings()
+    configure_logging(settings.log_level)
+
     app.state.settings = settings
     app.state.simulator = build_client(settings)
     app.state.database = default_database
+    app.state.cache = StateCache()
+    app.state.sync = SyncService(
+        client=app.state.simulator,
+        database=app.state.database,
+        cache=app.state.cache,
+        settings=settings,
+    )
+
     await app.state.database.connect()
+
     try:
+        if settings.sync_enabled:
+            await app.state.sync.start()
         yield
     finally:
+        await app.state.sync.stop()
         await app.state.database.disconnect()
         await app.state.simulator.aclose()
 
@@ -111,6 +128,16 @@ def get_database(request: Request) -> Database:
     return request.app.state.database
 
 
+def get_cache(request: Request) -> StateCache:
+    """Return the process-wide state cache."""
+    return request.app.state.cache
+
+
+def get_sync(request: Request) -> SyncService:
+    """Return the process-wide sync service."""
+    return request.app.state.sync
+
+
 # -- health ----------------------------------------------------------------
 
 
@@ -148,6 +175,7 @@ async def _database_health(db: Database) -> dict[str, Any]:
 
 @app.get("/health", tags=["ops"])
 async def health(
+    request: Request,
     client: SimulatorClient = Depends(get_simulator),
     db: Database = Depends(get_database),
 ) -> JSONResponse:
@@ -174,140 +202,195 @@ async def health(
             "service": get_settings().app_name,
             "version": get_settings().app_version,
             "components": components,
+            "sync": request.app.state.sync.status(),
         },
     )
 
 
-# -- state snapshot --------------------------------------------------------
+# -- cached state ----------------------------------------------------------
+
+
+def _require_state(cache: StateCache) -> Any:
+    """Return the cached snapshot, or raise 503 when there is none yet."""
+    state = cache.state
+    if state is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="no simulator state available yet",
+        )
+    return state
+
+
+def _state_envelope(cache: StateCache, payload: dict[str, Any]) -> dict[str, Any]:
+    """Wrap a payload with the cache's freshness metadata."""
+    return {**payload, **cache.metadata()}
 
 
 @app.get("/api/state", tags=["state"])
 async def get_state(
     request: Request,
-    client: SimulatorClient = Depends(get_simulator),
+    cache: StateCache = Depends(get_cache),
 ) -> dict[str, Any]:
-    """Return a consolidated snapshot of the simulated fuel network."""
-    try:
-        client.reset_stale()
-        (
-            instance,
-            regions,
-            depots,
-            stations,
-            routes,
-            arrivals,
-            events,
-            allocations,
-            metrics,
-        ) = await _gather_state(client)
-    except (SimulatorConnectionError, SimulatorTimeoutError) as exc:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"simulator unreachable: {exc}",
-        ) from exc
-    except SimulatorValidationError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"simulator returned malformed data: {exc}",
-        ) from exc
-    except SimulatorAPIError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"simulator error: {exc}",
-        ) from exc
+    """Return a consolidated snapshot of the simulated fuel network.
 
-    snapshot: dict[str, Any] = {
-        "instance": instance.model_dump(mode="json"),
-        "regions": [r.model_dump(mode="json") for r in regions],
-        "depots": [d.model_dump(mode="json") for d in depots],
-        "stations": [s.model_dump(mode="json") for s in stations],
-        "routes": [r.model_dump(mode="json") for r in routes],
-        "supply_arrivals": [a.model_dump(mode="json") for a in arrivals],
-        "events": [e.model_dump(mode="json") for e in events],
-        "allocations": [a.model_dump(mode="json") for a in allocations],
-        "metrics": metrics.model_dump(mode="json"),
-        "stale": client.stale,
-    }
-
-    await _persist_snapshot(db=request.app.state.database, instance=instance, metrics=metrics)
-
-    return snapshot
+    Served from the cached state the background sync service maintains, so
+    the dashboard never blocks on the simulator.
+    """
+    state = _require_state(cache)
+    return _state_envelope(cache, state.to_payload())
 
 
-async def _gather_state(
-    client: SimulatorClient,
-) -> tuple[
-    Instance,
-    list[Region],
-    list[Depot],
-    list[Station],
-    list[Route],
-    list[SupplyArrival],
-    list[SimulatorEvent],
-    list[Allocation],
-    Metrics,
-]:
-    """Fetch every section of the state snapshot in parallel."""
-    import asyncio
-
-    (
-        instance,
-        regions,
-        depots,
-        stations,
-        routes,
-        arrivals,
-        events,
-        allocations,
-        metrics,
-    ) = await asyncio.gather(
-        client.get_instance(),
-        client.get_regions(),
-        client.get_depots(),
-        client.get_stations(),
-        client.get_routes(),
-        client.get_supply_arrivals(),
-        client.get_events(),
-        client.get_allocations(),
-        client.get_metrics(),
-    )
-    return (
-        instance,
-        regions,
-        depots,
-        stations,
-        routes,
-        arrivals,
-        events,
-        allocations,
-        metrics,
-    )
+@app.get("/api/stations", tags=["state"])
+async def get_stations(
+    cache: StateCache = Depends(get_cache),
+) -> dict[str, Any]:
+    """Return every station, read from the stored state."""
+    state = _require_state(cache)
+    payload = {"stations": [s.model_dump(mode="json") for s in state.stations]}
+    return _state_envelope(cache, payload)
 
 
-async def _persist_snapshot(db: Database, instance: Instance, metrics: Metrics) -> None:
-    """Record the snapshot in Postgres; never fail the request on a DB error."""
-    from .models import StateSnapshot
+@app.get("/api/depots", tags=["state"])
+async def get_depots(
+    cache: StateCache = Depends(get_cache),
+) -> dict[str, Any]:
+    """Return every depot, read from the stored state."""
+    state = _require_state(cache)
+    payload = {"depots": [d.model_dump(mode="json") for d in state.depots]}
+    return _state_envelope(cache, payload)
+
+
+@app.get("/api/routes", tags=["state"])
+async def get_routes(
+    cache: StateCache = Depends(get_cache),
+) -> dict[str, Any]:
+    """Return every route, read from the stored state."""
+    state = _require_state(cache)
+    payload = {"routes": [r.model_dump(mode="json") for r in state.routes]}
+    return _state_envelope(cache, payload)
+
+
+@app.get("/api/events", tags=["state"])
+async def get_events(
+    cache: StateCache = Depends(get_cache),
+) -> dict[str, Any]:
+    """Return the domain events, read from the stored state."""
+    state = _require_state(cache)
+    payload = {"events": [e.model_dump(mode="json") for e in state.events]}
+    return _state_envelope(cache, payload)
+
+
+@app.get("/api/supply-arrivals", tags=["state"])
+async def get_supply_arrivals(
+    cache: StateCache = Depends(get_cache),
+) -> dict[str, Any]:
+    """Return the scheduled supply arrivals, read from the stored state."""
+    state = _require_state(cache)
+    payload = {"supply_arrivals": [a.model_dump(mode="json") for a in state.supply_arrivals]}
+    return _state_envelope(cache, payload)
+
+
+@app.get("/api/allocations", tags=["state"])
+async def get_allocations(
+    cache: StateCache = Depends(get_cache),
+) -> dict[str, Any]:
+    """Return the allocation ledger, read from the stored state."""
+    state = _require_state(cache)
+    payload = {"allocations": [a.model_dump(mode="json") for a in state.allocations]}
+    return _state_envelope(cache, payload)
+
+
+@app.get("/api/history/{station_id}", tags=["state"])
+async def get_history(
+    station_id: str = Path(..., min_length=1, max_length=64),
+    limit: int = Query(default=200, ge=1, le=2000),
+    db: Database = Depends(get_database),
+) -> dict[str, Any]:
+    """Return the stored demand history for one station.
+
+    Read from Postgres, not from the simulator: this is the time series the
+    intelligence layer will read from.
+    """
+    from sqlalchemy import select
+
+    from .models import DemandObservationRow
 
     try:
         async with db.session() as session:
-            session.add(
-                StateSnapshot(
-                    sim_tick=instance.tick,
-                    sim_time=instance.sim_time,
-                    sim_status=instance.status.value,
-                    scenario_id=instance.scenario_id,
-                    service_level=metrics.service_level,
-                    unmet_demand_liters=metrics.unmet_demand_liters,
-                    served_demand_liters=metrics.served_demand_liters,
-                    allocation_liters=metrics.allocation_liters,
-                    allocation_failures=metrics.allocation_failures,
-                    stale=False,
-                    payload="{}",
-                )
+            result = await session.execute(
+                select(DemandObservationRow)
+                .where(DemandObservationRow.station_id == station_id)
+                .order_by(DemandObservationRow.tick.desc())
+                .limit(limit)
             )
-            await session.commit()
+            rows = list(result.scalars())
     except Exception as exc:
-        logger.warning("could not persist state snapshot: %s", exc)
+        logger.warning("could not read demand history: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="demand history is not available",
+        ) from exc
+
+    payload = {
+        "station_id": station_id,
+        "count": len(rows),
+        "observations": [
+            {
+                "id": row.simulator_id,
+                "station_id": row.station_id,
+                "fuel_type": row.fuel_type,
+                "tick": row.tick,
+                "sim_time": row.sim_time.isoformat(),
+                "demand_liters": row.demand_liters,
+                "served_liters": row.served_liters,
+                "unmet_liters": row.unmet_liters,
+            }
+            for row in rows
+        ],
+    }
+    return payload
+
+
+@app.get("/api/alerts", tags=["state"])
+async def get_alerts(
+    limit: int = Query(default=100, ge=1, le=1000),
+    db: Database = Depends(get_database),
+) -> dict[str, Any]:
+    """Return the platform-generated alerts, newest first."""
+    from sqlalchemy import select
+
+    from .models import Alert
+
+    try:
+        async with db.session() as session:
+            result = await session.execute(
+                select(Alert).order_by(Alert.created_at.desc()).limit(limit)
+            )
+            rows = list(result.scalars())
+    except Exception as exc:
+        logger.warning("could not read alerts: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="alerts are not available",
+        ) from exc
+
+    return {
+        "count": len(rows),
+        "alerts": [
+            {
+                "id": row.id,
+                "created_at": row.created_at.isoformat(),
+                "kind": row.kind,
+                "severity": row.severity,
+                "entity_type": row.entity_type,
+                "entity_id": row.entity_id,
+                "sim_tick": row.sim_tick,
+                "message": row.message,
+                "resolved": row.resolved,
+            }
+            for row in rows
+        ],
+    }
 
 
 @app.get("/", tags=["meta"])
@@ -319,4 +402,6 @@ async def root() -> dict[str, str]:
         "docs": "/docs",
         "health": "/health",
         "state": "/api/state",
+        "stations": "/api/stations",
+        "history": "/api/history/{station_id}",
     }

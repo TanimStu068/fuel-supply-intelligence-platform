@@ -1,8 +1,15 @@
 """Prometheus instrumentation for the backend.
 
-Exposes request-rate, latency and error-rate series plus counters for
-simulator outcomes (success / fault-injected / error), which is what the
-Grafana "Fuel Platform Overview" dashboard consumes.
+Two groups of series:
+
+**Application** — request rate, latency histogram and error rate for the
+backend's own HTTP surface.
+
+**Integration** — what happens between the platform and the simulator:
+call outcomes and latency, SSE reconnects, stale responses, degraded-mode
+activations and the age of the last successful sync.
+
+The Grafana "Fuel Platform Overview" dashboard consumes these.
 """
 
 from __future__ import annotations
@@ -10,7 +17,7 @@ from __future__ import annotations
 import time
 
 from fastapi import FastAPI, Request, Response
-from prometheus_client import CONTENT_TYPE_LATEST, Counter, Histogram, generate_latest
+from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, Histogram, generate_latest
 
 #: HTTP requests, labelled by method, path and status code.
 HTTP_REQUESTS = Counter(
@@ -44,6 +51,70 @@ SIMULATOR_REQUEST_DURATION = Histogram(
 SIMULATOR_STALE_RESPONSES = Counter(
     "simulator_stale_responses_total",
     "Responses carrying the X-Simulator-Stale header.",
+)
+
+#: Sync cycles, labelled by outcome (success / failed).
+SYNC_CYCLES = Counter(
+    "sync_cycles_total",
+    "Background sync cycles, by outcome.",
+    ["outcome"],
+)
+
+#: How long one full sync cycle takes.
+SYNC_CYCLE_DURATION = Histogram(
+    "sync_cycle_duration_seconds",
+    "Duration of a full background sync cycle.",
+)
+
+#: SSE connections opened against the simulator stream.
+SSE_CONNECTIONS = Counter(
+    "sse_connections_total",
+    "SSE connections opened to the simulator event stream.",
+)
+
+#: SSE reconnects after a drop or a failure.
+SSE_RECONNECTS = Counter(
+    "sse_reconnects_total",
+    "SSE reconnect attempts, by reason.",
+    ["reason"],
+)
+
+#: SSE events received, by event name.
+SSE_EVENTS = Counter(
+    "sse_events_total",
+    "SSE events received from the simulator, by event name.",
+    ["event"],
+)
+
+#: Times the cached state was served in degraded mode.
+DEGRADED_MODE_ACTIVATIONS = Counter(
+    "degraded_mode_activations_total",
+    "Times the backend served last-known state because the simulator was unreachable.",
+)
+
+#: Whether the backend is currently in degraded mode.
+DEGRADED_MODE = Gauge(
+    "degraded_mode",
+    "1 when the backend is serving last-known state, 0 otherwise.",
+)
+
+#: Whether the cached state is currently marked stale.
+STALE_DATA = Gauge(
+    "stale_data",
+    "1 when the cached state is marked stale, 0 otherwise.",
+)
+
+#: Age in seconds of the last successful sync.
+LAST_SYNC_AGE = Gauge(
+    "last_sync_age_seconds",
+    "Seconds since the last successful sync with the simulator.",
+)
+
+#: Demand observations ingested, by whether the row was new or a duplicate.
+DEMAND_INGESTED = Counter(
+    "demand_observations_ingested_total",
+    "Demand observations written to Postgres, by outcome.",
+    ["outcome"],
 )
 
 
