@@ -4,9 +4,9 @@ Intelligent decision-support and resilience platform for a simulated fuel supply
 network. (in association
 with Poridhi.io).
 
-> **Status:** Day 1 of 7 complete. Days 2 to 7 are planned below.
+> **Status:** Day 2 of 7 complete. Days 3 to 7 are planned below.
 > Submission deadline: **26 November 2026**.
-> Latest report: [`docs/progress/day1.md`](docs/progress/day1.md)
+> Latest report: [`docs/progress/day2.md`](docs/progress/day2.md)
 
 ---
 
