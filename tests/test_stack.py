@@ -72,6 +72,8 @@ def test_backend_state_has_every_section(
         "allocations",
         "metrics",
         "stale",
+        "degraded",
+        "age_seconds",
     ):
         assert key in body, f"missing section: {key}"
 
@@ -79,6 +81,59 @@ def test_backend_state_has_every_section(
     assert len(body["stations"]) == 4
     assert len(body["routes"]) == 6
     assert body["metrics"]["service_level"] >= 0.0
+
+
+@pytest.mark.parametrize(
+    ("path", "key"),
+    [
+        ("/api/stations", "stations"),
+        ("/api/depots", "depots"),
+        ("/api/routes", "routes"),
+        ("/api/events", "events"),
+        ("/api/supply-arrivals", "supply_arrivals"),
+        ("/api/allocations", "allocations"),
+    ],
+)
+def test_read_endpoints_serve_the_stored_state(
+    http_client: httpx.Client, backend_url: str, path: str, key: str
+) -> None:
+    response = http_client.get(f"{backend_url}{path}")
+    assert response.status_code == 200
+
+    body = response.json()
+    assert key in body
+    assert body["degraded"] is False
+    assert body["stale"] is False
+
+
+def test_history_endpoint_serves_stored_demand(
+    http_client: httpx.Client, backend_url: str
+) -> None:
+    response = http_client.get(f"{backend_url}/api/history/station-mirpur")
+    assert response.status_code == 200
+
+    body = response.json()
+    assert body["station_id"] == "station-mirpur"
+    assert "observations" in body
+
+
+def test_metrics_expose_the_sync_series(
+    http_client: httpx.Client, backend_url: str
+) -> None:
+    response = http_client.get(f"{backend_url}/metrics")
+    assert response.status_code == 200
+
+    text = response.text
+    for series in (
+        "http_requests_total",
+        "http_request_duration_seconds",
+        "simulator_requests_total",
+        "sse_reconnects_total",
+        "last_sync_age_seconds",
+        "degraded_mode",
+        "stale_data",
+    ):
+        assert series in text, f"missing metric: {series}"
 
 
 def test_backend_exposes_prometheus_metrics(
