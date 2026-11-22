@@ -77,6 +77,27 @@ class Settings(BaseSettings):
     #: How many demand observations to pull per ingest cycle.
     demand_history_limit: int = Field(default=500, alias="DEMAND_HISTORY_LIMIT", gt=0)
 
+    # --- Intelligence -------------------------------------------------------
+    #: How many ticks ahead the demand forecast reaches. One simulated day
+    #: (96 ticks at 15 minutes). The horizon is the platform's *sight
+    #: line*: with a six-hour horizon a station can only be seen running
+    #: dry six hours before it happens, which is far too late to ship fuel
+    #: to it. A day is also the natural planning window for a fuel station
+    #: and matches the simulator's own resupply cadence.
+    forecast_horizon_ticks: int = Field(default=96, alias="FORECAST_HORIZON_TICKS", gt=0)
+    #: Minimum confidence the learned model must reach to be trusted.
+    forecast_min_confidence: float = Field(
+        default=0.35, alias="FORECAST_MIN_CONFIDENCE", ge=0, le=1
+    )
+    #: Minimum training rows the learned model needs before it is trusted.
+    forecast_min_training_rows: int = Field(default=30, alias="FORECAST_MIN_TRAINING_ROWS", gt=0)
+    #: How many stored observations the forecaster reads per evaluation.
+    forecast_history_limit: int = Field(default=5000, alias="FORECAST_HISTORY_LIMIT", gt=0)
+    #: How often the learned demand model is retrained, in seconds.
+    model_train_interval: int = Field(default=300, alias="MODEL_TRAIN_INTERVAL", gt=0)
+    #: Whether the platform dispatches fuel in response to risk.
+    dispatch_enabled: bool = Field(default=True, alias="DISPATCH_ENABLED")
+
     # --- Observability -----------------------------------------------------
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
     metrics_enabled: bool = Field(default=True, alias="METRICS_ENABLED")

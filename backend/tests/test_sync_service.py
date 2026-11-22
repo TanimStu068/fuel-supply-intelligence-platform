@@ -541,3 +541,54 @@ async def test_ingest_demand_history_survives_an_unreachable_simulator(service, 
     client.unreachable = True
 
     assert await service.ingest_demand_history() == (0, 0)
+
+
+# -- a simulator reset --------------------------------------------------------
+
+
+@pytest.fixture
+def stored_history(monkeypatch):
+    """Control what the stored demand history looks like."""
+    state = {"max_tick": None, "truncated": False}
+
+    async def fake_max_tick(session):
+        return state["max_tick"]
+
+    async def fake_truncate(session):
+        state["truncated"] = True
+        state["max_tick"] = None
+        return 100
+
+    monkeypatch.setattr("app.sync_service.max_demand_tick", fake_max_tick)
+    monkeypatch.setattr("app.sync_service.truncate_demand_history", fake_truncate)
+
+    return state
+
+
+async def test_a_reset_drops_the_stored_history(service, client, stored_history) -> None:
+    """A reset restarts the clock, so the old history is a different timeline.
+
+    Keeping it would make the old run's tick 1 sit next to the new run's
+    tick 1, and the forecaster would learn from a discontinuity.
+    """
+    stored_history["max_tick"] = 400
+
+    await service.ingest_demand_history()
+
+    assert stored_history["truncated"] is True
+
+
+async def test_a_normal_run_keeps_the_stored_history(service, client, stored_history) -> None:
+    stored_history["max_tick"] = 10
+
+    await service.ingest_demand_history()
+
+    assert stored_history["truncated"] is False
+
+
+async def test_an_empty_store_keeps_the_stored_history(service, client, stored_history) -> None:
+    stored_history["max_tick"] = None
+
+    await service.ingest_demand_history()
+
+    assert stored_history["truncated"] is False

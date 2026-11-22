@@ -233,3 +233,115 @@ class SystemHealth(Base):
     status: Mapped[str] = mapped_column(String(32), index=True)
     detail: Mapped[str | None] = mapped_column(Text, nullable=True)
     correlation_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+
+class DemandForecast(Base):
+    """One forecast for one (station, fuel) pair at one evaluation tick.
+
+    The forecast's points and its confidence interval are stored as JSON so
+    the exact numbers that were shown to an operator can be reproduced
+    later. ``model`` records which predictor produced it, and
+    ``needs_human_review`` records whether it was flagged for a human.
+    """
+
+    __tablename__ = "demand_forecasts"
+    __table_args__ = (
+        UniqueConstraint(
+            "station_id",
+            "fuel_type",
+            "sim_tick",
+            name="uq_demand_forecasts_station_fuel_tick",
+        ),
+        Index("ix_demand_forecasts_model", "model"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
+    station_id: Mapped[str] = mapped_column(String(64), index=True)
+    fuel_type: Mapped[str] = mapped_column(String(16))
+    sim_tick: Mapped[int] = mapped_column(Integer, index=True)
+    sim_time: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    #: Which predictor produced this forecast: ``baseline`` or ``learned``.
+    model: Mapped[str] = mapped_column(String(16))
+    #: 0..1.
+    confidence: Mapped[float] = mapped_column(Float)
+    needs_human_review: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    fallback_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    horizon_ticks: Mapped[int] = mapped_column(Integer)
+    total_demand_liters: Mapped[float] = mapped_column(Float)
+    lower_total_liters: Mapped[float] = mapped_column(Float)
+    upper_total_liters: Mapped[float] = mapped_column(Float)
+    #: The forecast points and the interval, as JSON.
+    payload: Mapped[str] = mapped_column(Text)
+
+
+class RiskAssessmentRow(Base):
+    """One risk assessment for one (station, fuel) pair at one tick.
+
+    The signals that drove the score are stored alongside it, so a risk can
+    be explained after the fact without re-running the model.
+    """
+
+    __tablename__ = "risk_assessments"
+    __table_args__ = (
+        UniqueConstraint(
+            "station_id",
+            "fuel_type",
+            "sim_tick",
+            name="uq_risk_assessments_station_fuel_tick",
+        ),
+        Index("ix_risk_assessments_level", "risk_level"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
+    station_id: Mapped[str] = mapped_column(String(64), index=True)
+    fuel_type: Mapped[str] = mapped_column(String(16))
+    sim_tick: Mapped[int] = mapped_column(Integer, index=True)
+    risk_level: Mapped[str] = mapped_column(String(16), index=True)
+    risk_score: Mapped[float] = mapped_column(Float)
+    hours_to_stockout: Mapped[float | None] = mapped_column(Float, nullable=True)
+    stockout_probability: Mapped[float] = mapped_column(Float)
+    needs_human_review: Mapped[bool] = mapped_column(Boolean, default=False)
+    recommendation: Mapped[str] = mapped_column(Text)
+    #: The signals that drove the score, as JSON.
+    payload: Mapped[str] = mapped_column(Text)
+
+
+class PredictionEvaluation(Base):
+    """A scored prediction, compared against what actually happened.
+
+    This is how the prediction error is measured: when a forecast for tick
+    T is made, and the demand for tick T is observed, the difference is
+    recorded here.
+    """
+
+    __tablename__ = "prediction_evaluations"
+    __table_args__ = (
+        UniqueConstraint(
+            "station_id",
+            "fuel_type",
+            "target_tick",
+            name="uq_prediction_evaluations_station_fuel_tick",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
+    station_id: Mapped[str] = mapped_column(String(64), index=True)
+    fuel_type: Mapped[str] = mapped_column(String(16))
+    target_tick: Mapped[int] = mapped_column(Integer, index=True)
+    model: Mapped[str] = mapped_column(String(16), index=True)
+    predicted_demand: Mapped[float] = mapped_column(Float)
+    actual_demand: Mapped[float] = mapped_column(Float)
+    absolute_error: Mapped[float] = mapped_column(Float)
+    lower_bound: Mapped[float] = mapped_column(Float)
+    upper_bound: Mapped[float] = mapped_column(Float)
+    #: True when the actual demand landed inside the confidence interval.
+    within_interval: Mapped[bool] = mapped_column(Boolean, default=False)

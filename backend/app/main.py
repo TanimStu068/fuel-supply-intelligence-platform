@@ -32,6 +32,11 @@ from fastapi.responses import JSONResponse
 from .config import get_settings
 from .db import Database
 from .db import database as default_database
+from .intelligence.dispatcher import Dispatcher
+from .intelligence.engine import IntelligenceEngine
+from .intelligence.forecasting import ForecastSelector, ForecastSelectorConfig
+from .intelligence.risk import RiskLevel
+from .intelligence_service import IntelligenceService
 from .logging_config import configure_logging
 from .metrics import install_metrics_middleware
 from .simulator_client import SimulatorClient, build_client
@@ -67,11 +72,30 @@ async def lifespan(app: FastAPI):
     app.state.simulator = build_client(settings)
     app.state.database = default_database
     app.state.cache = StateCache()
+    app.state.intelligence = IntelligenceService(
+        database=app.state.database,
+        cache=app.state.cache,
+        engine=IntelligenceEngine(
+            selector=ForecastSelector(
+                config=ForecastSelectorConfig(
+                    min_confidence=settings.forecast_min_confidence,
+                    min_training_rows=settings.forecast_min_training_rows,
+                )
+            ),
+            horizon_ticks=settings.forecast_horizon_ticks,
+        ),
+        dispatcher=Dispatcher(
+            app.state.simulator,
+            enabled=settings.dispatch_enabled,
+        ),
+        client=app.state.simulator,
+    )
     app.state.sync = SyncService(
         client=app.state.simulator,
         database=app.state.database,
         cache=app.state.cache,
         settings=settings,
+        intelligence=app.state.intelligence,
     )
 
     await app.state.database.connect()
@@ -351,7 +375,7 @@ async def get_history(
     return payload
 
 
-@app.get("/api/alerts", tags=["state"])
+@app.get("/api/alerts", tags=["intelligence"])
 async def get_alerts(
     limit: int = Query(default=100, ge=1, le=1000),
     db: Database = Depends(get_database),
@@ -390,6 +414,173 @@ async def get_alerts(
             }
             for row in rows
         ],
+    }
+
+
+# -- intelligence -----------------------------------------------------------
+
+
+def get_intelligence(request: Request) -> IntelligenceService:
+    """Return the process-wide intelligence service."""
+    return request.app.state.intelligence
+
+
+@app.get("/api/risk", tags=["intelligence"])
+async def get_risk(
+    station_id: str | None = Query(default=None),
+    fuel_type: str | None = Query(default=None),
+    service: IntelligenceService = Depends(get_intelligence),
+) -> dict[str, Any]:
+    """Return the risk assessment for every station and fuel.
+
+    Each assessment carries the signals that produced it, so an operator can
+    see *why* a station is red. When a forecast was produced by the
+    rule-based fallback, the entry says so and is flagged for human review.
+    """
+    result = service.last_result
+    if result is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="the intelligence layer has not evaluated the network yet",
+        )
+
+    risks = result.risks
+    if station_id:
+        risks = [risk for risk in risks if risk.station_id == station_id]
+    if fuel_type:
+        risks = [risk for risk in risks if risk.fuel_type == fuel_type.upper()]
+
+    return {
+        "evaluated_at": result.evaluated_at.isoformat(),
+        "models_used": result.models_used,
+        "active_model": result.active_model if hasattr(result, "active_model") else None,
+        "needs_human_review_count": result.needs_human_review_count,
+        "fallback_activations": result.fallback_activations,
+        "summary": {
+            level.value: sum(1 for risk in result.risks if risk.risk_level.value == level.value)
+            for level in RiskLevel
+        },
+        "count": len(risks),
+        "risks": [risk.to_payload() for risk in risks],
+    }
+
+
+@app.get("/api/forecast", tags=["intelligence"])
+async def get_forecast(
+    station_id: str | None = Query(default=None),
+    fuel_type: str | None = Query(default=None),
+    service: IntelligenceService = Depends(get_intelligence),
+) -> dict[str, Any]:
+    """Return the demand forecasts for every station and fuel."""
+    result = service.last_result
+    if result is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="the intelligence layer has not evaluated the network yet",
+        )
+
+    forecasts = result.forecasts
+    if station_id:
+        forecasts = [f for f in forecasts if f.station_id == station_id]
+    if fuel_type:
+        forecasts = [f for f in forecasts if f.fuel_type == fuel_type.upper()]
+
+    return {
+        "evaluated_at": result.evaluated_at.isoformat(),
+        "models_used": result.models_used,
+        "count": len(forecasts),
+        "forecasts": [forecast.to_payload() for forecast in forecasts],
+    }
+
+
+@app.get("/api/anomalies", tags=["intelligence"])
+async def get_anomalies(
+    service: IntelligenceService = Depends(get_intelligence),
+) -> dict[str, Any]:
+    """Return the detected anomalies and bottlenecks."""
+    result = service.last_result
+    if result is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="the intelligence layer has not evaluated the network yet",
+        )
+
+    return {
+        "evaluated_at": result.evaluated_at.isoformat(),
+        "count": len(result.anomalies),
+        "anomalies": [anomaly.to_payload() for anomaly in result.anomalies],
+        "bottlenecks": [bottleneck.to_payload() for bottleneck in result.bottlenecks],
+    }
+
+
+@app.post("/api/model/train", tags=["intelligence"])
+async def train_model(
+    service: IntelligenceService = Depends(get_intelligence),
+) -> dict[str, Any]:
+    """Retrain the learned demand model on the stored history.
+
+    Returns the training metadata, including the validation error, so the
+    operator can see how good the model is before trusting it.
+    """
+    return await service.train_model()
+
+
+@app.get("/api/decisions", tags=["intelligence"])
+async def get_decisions(
+    service: IntelligenceService = Depends(get_intelligence),
+) -> dict[str, Any]:
+    """Return the most recent dispatch decisions.
+
+    The simulator never refills a station on its own, so these decisions are
+    what actually move fuel. Each one carries the reason it was made.
+    """
+    decisions = service.last_decisions
+    return {
+        "count": len(decisions),
+        "decisions": [decision.to_payload() for decision in decisions],
+    }
+
+
+@app.get("/api/model-status", tags=["intelligence"])
+async def get_model_status(
+    service: IntelligenceService = Depends(get_intelligence),
+) -> dict[str, Any]:
+    """Report which predictor is active and how well it is doing."""
+    engine = service.engine
+    selector = engine.selector
+    learned = selector.learned.model
+
+    return {
+        "active_model": selector.active_model.value,
+        "fallback_reasons": selector.fallback_counts,
+        "learned_model": (
+            {
+                "trained": True,
+                "training_rows": learned.training_rows,
+                "validation_mae_liters": round(learned.validation_mae, 4),
+                "training_mae_liters": round(learned.training_mae, 4),
+                "trained_at": learned.trained_at.isoformat(),
+                # The one-step error, and the error over a whole forecast
+                # horizon. The second one is the number that decides
+                # whether the model is actually used.
+                "baseline_validation_mae": round(
+                    float(learned.metadata.get("baseline_validation_mae", 0.0)), 4
+                ),
+                "horizon_total_mae_liters": round(
+                    float(learned.metadata.get("horizon_total_mae_liters", 0.0)), 1
+                ),
+                "baseline_horizon_total_mae_liters": round(
+                    float(learned.metadata.get("baseline_horizon_total_mae_liters", 0.0)), 1
+                ),
+                "beats_baseline": bool(learned.metadata.get("beats_baseline", 0.0)),
+                "beats_baseline_at_horizon": bool(
+                    learned.metadata.get("beats_baseline_at_horizon", 0.0)
+                ),
+                **{key: round(value, 4) for key, value in learned.metadata.items()},
+            }
+            if learned
+            else {"trained": False}
+        ),
     }
 
 

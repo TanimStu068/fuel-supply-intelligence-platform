@@ -48,6 +48,8 @@ from .metrics import (
     SYNC_CYCLES,
 )
 from .repository import (
+    max_demand_tick,
+    truncate_demand_history,
     write_alert,
     write_allocations,
     write_demand_observations,
@@ -79,11 +81,13 @@ class SyncService:
         database: Database,
         cache: StateCache,
         settings: Settings | None = None,
+        intelligence: Any | None = None,
     ) -> None:
         self._client = client
         self._database = database
         self._cache = cache
         self._settings = settings or get_settings()
+        self._intelligence = intelligence
         self._tasks: list[asyncio.Task[None]] = []
         self._stopping = asyncio.Event()
         #: Set by the SSE loop so the poller can shorten its interval when
@@ -93,11 +97,12 @@ class SyncService:
     # -- lifecycle ---------------------------------------------------------
 
     async def start(self) -> None:
-        """Start the poller and the SSE listener."""
+        """Start the poller, the SSE listener and the model trainer."""
         self._stopping.clear()
         self._tasks = [
             asyncio.create_task(self._poll_loop(), name="sync-poller"),
             asyncio.create_task(self._sse_loop(), name="sync-sse"),
+            asyncio.create_task(self._trainer_loop(), name="model-trainer"),
         ]
         logger.info("sync service started")
 
@@ -195,7 +200,7 @@ class SyncService:
         await self._persist(snapshot, correlation_id)
         await self._ingest_demand_history(correlation_id)
         await self._raise_alerts(snapshot, correlation_id)
-
+        await self._evaluate_intelligence(correlation_id)
         age = self._cache.last_sync_age() or 0.0
         LAST_SYNC_AGE.set(age)
         STALE_DATA.set(1 if stale else 0)
@@ -524,6 +529,13 @@ class SyncService:
         if not observations:
             return (0, 0)
 
+        # A simulator reset restarts the clock at tick 0, so the stored
+        # history belongs to a different timeline.
+        await self._drop_history_if_the_world_was_reset(
+            correlation_id=correlation_id,
+            current_tick=observations[0].tick,
+        )
+
         try:
             async with self._database.session() as session:
                 written, _ = await write_demand_observations(session, observations)
@@ -546,6 +558,72 @@ class SyncService:
         )
         return (written, 0)
 
+    async def _trainer_loop(self) -> None:
+        """Retrain the learned demand model on a slow schedule.
+
+        Training is not cheap and the history changes slowly, so the model
+        is retrained every ``model_train_interval`` seconds rather than on
+        every tick. Until the first training completes, the rule-based
+        baseline answers every forecast.
+        """
+        interval = max(60, self._settings.model_train_interval)
+        while not self._stopping.is_set():
+            try:
+                await asyncio.wait_for(self._stopping.wait(), timeout=interval)
+                return
+            except TimeoutError:
+                pass
+
+            if self._intelligence is None:
+                continue
+
+            try:
+                outcome = await self._intelligence.train_model()
+            except Exception as exc:
+                logger.warning("model training failed: %s", exc)
+                continue
+
+            if outcome.get("trained"):
+                logger.info(
+                    "learned demand model retrained",
+                    extra={
+                        "training_rows": outcome.get("training_rows"),
+                        "validation_mae": outcome.get("validation_mae"),
+                    },
+                )
+
+    async def _evaluate_intelligence(self, correlation_id: str) -> None:
+        """Run the intelligence layer over the state we just fetched.
+
+        A failure here must never stop the sync: the platform still serves
+        the data, it just does not have fresh forecasts.
+        """
+        if self._intelligence is None:
+            return
+        try:
+            result = await self._intelligence.evaluate_and_store()
+        except Exception as exc:
+            logger.warning(
+                "intelligence evaluation failed",
+                extra={"correlation_id": correlation_id, "error": str(exc)},
+            )
+            return
+
+        if result is None:
+            return
+
+        critical = len(result.critical_risks)
+        if critical:
+            logger.warning(
+                "shortage risk detected",
+                extra={
+                    "correlation_id": correlation_id,
+                    "critical": critical,
+                    "watch": len(result.watch_risks),
+                    "models_used": result.models_used,
+                },
+            )
+
     async def _ingest_demand_history(self, correlation_id: str) -> None:
         """Pull the demand time series into Postgres.
 
@@ -566,6 +644,15 @@ class SyncService:
         if not observations:
             return
 
+        # A simulator reset restarts the clock at tick 0. The stored
+        # history belongs to the old timeline, and keeping it would make
+        # two different runs look like one continuous series — with the
+        # new run's tick 1 sitting right next to the old run's tick 1.
+        await self._drop_history_if_the_world_was_reset(
+            correlation_id=correlation_id,
+            current_tick=observations[0].tick,
+        )
+
         try:
             async with self._database.session() as session:
                 await write_demand_observations(session, observations)
@@ -584,6 +671,49 @@ class SyncService:
                 "correlation_id": correlation_id,
                 "rows": len(observations),
                 "limit": self._settings.demand_history_limit,
+            },
+        )
+
+    async def _drop_history_if_the_world_was_reset(
+        self,
+        *,
+        correlation_id: str,
+        current_tick: int,
+    ) -> None:
+        """Wipe the stored history when the simulator's clock went backwards.
+
+        ``POST /admin/reset`` deletes the simulator's world and starts the
+        clock again at tick 0. The stored demand history is from the old
+        run, and the tick numbers overlap, so the forecaster would read the
+        two runs as one series with a discontinuity in the middle — and
+        learn the wrong thing from it.
+
+        The check is deliberately conservative: the history is only dropped
+        when the stored maximum tick is *ahead* of the tick we are looking
+        at, which is what a reset looks like from here.
+        """
+        try:
+            async with self._database.session() as session:
+                stored_max = await max_demand_tick(session)
+                if stored_max is None or stored_max <= current_tick:
+                    return
+
+                removed = await truncate_demand_history(session)
+                await session.commit()
+        except Exception as exc:
+            logger.warning(
+                "could not check for a simulator reset",
+                extra={"correlation_id": correlation_id, "error": str(exc)},
+            )
+            return
+
+        logger.warning(
+            "the simulator was reset; the stored demand history was dropped",
+            extra={
+                "correlation_id": correlation_id,
+                "stored_max_tick": stored_max,
+                "current_tick": current_tick,
+                "rows_removed": removed,
             },
         )
 

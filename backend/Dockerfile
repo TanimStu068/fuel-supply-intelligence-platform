@@ -18,7 +18,8 @@ RUN pip install --upgrade pip && pip install \
     "asyncpg>=0.30.0" \
     "prometheus-client>=0.21.0" \
     "alembic>=1.14.0" \
-    "psycopg[binary]>=3.2.0"
+    "psycopg[binary]>=3.2.0" \
+    "scikit-learn>=1.5.0"
 
 COPY app ./app
 COPY alembic.ini ./alembic.ini

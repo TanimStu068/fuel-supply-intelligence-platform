@@ -54,6 +54,12 @@ services:
       SSE_RECONNECT_BASE_DELAY: ${SSE_RECONNECT_BASE_DELAY:-1}
       SSE_RECONNECT_MAX_DELAY: ${SSE_RECONNECT_MAX_DELAY:-30}
       DEMAND_HISTORY_LIMIT: ${DEMAND_HISTORY_LIMIT:-500}
+      # --- intelligence (Day 3) ---
+      # How many ticks ahead the demand forecast reaches. 96 ticks is one
+      # simulated day at the default 15-minute tick.
+      FORECAST_HORIZON_TICKS: ${FORECAST_HORIZON_TICKS:-96}
+      MODEL_TRAIN_INTERVAL: ${MODEL_TRAIN_INTERVAL:-300}
+      DISPATCH_ENABLED: ${DISPATCH_ENABLED:-true}
     ports:
       - "${BACKEND_PORT:-8001}:8000"
     healthcheck:

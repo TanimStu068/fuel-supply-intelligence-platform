@@ -22,9 +22,12 @@ from .models import (
     Alert,
     AllocationRow,
     DecisionRecord,
+    DemandForecast,
     DemandObservationRow,
     DomainEventRow,
     InventorySnapshot,
+    PredictionEvaluation,
+    RiskAssessmentRow,
     StateSnapshot,
     SystemHealth,
 )
@@ -202,6 +205,19 @@ async def max_demand_tick(session: AsyncSession) -> int | None:
     return row[0] if row else None
 
 
+async def truncate_demand_history(session: AsyncSession) -> int:
+    """Delete every stored demand observation.
+
+    Used when the simulator is reset. A reset wipes the simulator's world
+    and restarts the clock at tick 0, so the stored history would otherwise
+    mix two different timelines: the old run's tick 400 and the new run's
+    tick 1 would share a tick number, and the forecaster would read them
+    as one continuous series.
+    """
+    result = await session.execute(DemandObservationRow.__table__.delete())
+    return result.rowcount or 0
+
+
 # -- ledger mirrors ---------------------------------------------------------
 
 
@@ -279,6 +295,158 @@ async def write_domain_events(
     )
     await session.execute(statement)
     return len(rows)
+
+
+# -- forecasts, risk and evaluation ----------------------------------------
+
+
+async def write_demand_forecast(
+    session: AsyncSession,
+    *,
+    station_id: str,
+    fuel_type: str,
+    sim_tick: int,
+    sim_time: datetime,
+    model: str,
+    confidence: float,
+    needs_human_review: bool,
+    fallback_reason: str | None,
+    horizon_ticks: int,
+    total_demand: float,
+    lower_total: float,
+    upper_total: float,
+    payload: dict[str, Any],
+) -> None:
+    """Upsert one forecast row."""
+    statement = pg_insert(DemandForecast).values(
+        station_id=station_id,
+        fuel_type=fuel_type,
+        sim_tick=sim_tick,
+        sim_time=sim_time,
+        model=model,
+        confidence=confidence,
+        needs_human_review=needs_human_review,
+        fallback_reason=fallback_reason,
+        horizon_ticks=horizon_ticks,
+        total_demand_liters=total_demand,
+        lower_total_liters=lower_total,
+        upper_total_liters=upper_total,
+        payload=json.dumps(payload, default=str),
+    )
+    statement = statement.on_conflict_do_update(
+        constraint="uq_demand_forecasts_station_fuel_tick",
+        set_={
+            "model": statement.excluded.model,
+            "confidence": statement.excluded.confidence,
+            "needs_human_review": statement.excluded.needs_human_review,
+            "fallback_reason": statement.excluded.fallback_reason,
+            "total_demand_liters": statement.excluded.total_demand_liters,
+            "lower_total_liters": statement.excluded.lower_total_liters,
+            "upper_total_liters": statement.excluded.upper_total_liters,
+            "payload": statement.excluded.payload,
+        },
+    )
+    await session.execute(statement)
+
+
+async def write_risk_assessment(
+    session: AsyncSession,
+    *,
+    station_id: str,
+    fuel_type: str,
+    sim_tick: int,
+    risk_level: str,
+    risk_score: float,
+    hours_to_stockout: float | None,
+    stockout_probability: float,
+    needs_human_review: bool,
+    recommendation: str,
+    payload: dict[str, Any],
+) -> None:
+    """Upsert one risk assessment row."""
+    statement = pg_insert(RiskAssessmentRow).values(
+        station_id=station_id,
+        fuel_type=fuel_type,
+        sim_tick=sim_tick,
+        risk_level=risk_level,
+        risk_score=risk_score,
+        hours_to_stockout=hours_to_stockout,
+        stockout_probability=stockout_probability,
+        needs_human_review=needs_human_review,
+        recommendation=recommendation,
+        payload=json.dumps(payload, default=str),
+    )
+    statement = statement.on_conflict_do_update(
+        constraint="uq_risk_assessments_station_fuel_tick",
+        set_={
+            "risk_level": statement.excluded.risk_level,
+            "risk_score": statement.excluded.risk_score,
+            "hours_to_stockout": statement.excluded.hours_to_stockout,
+            "stockout_probability": statement.excluded.stockout_probability,
+            "needs_human_review": statement.excluded.needs_human_review,
+            "recommendation": statement.excluded.recommendation,
+            "payload": statement.excluded.payload,
+        },
+    )
+    await session.execute(statement)
+
+
+async def write_prediction_evaluation(
+    session: AsyncSession,
+    *,
+    station_id: str,
+    fuel_type: str,
+    target_tick: int,
+    model: str,
+    predicted_demand: float,
+    actual_demand: float,
+    lower_bound: float,
+    upper_bound: float,
+) -> None:
+    """Upsert one scored prediction."""
+    statement = pg_insert(PredictionEvaluation).values(
+        station_id=station_id,
+        fuel_type=fuel_type,
+        target_tick=target_tick,
+        model=model,
+        predicted_demand=predicted_demand,
+        actual_demand=actual_demand,
+        absolute_error=abs(predicted_demand - actual_demand),
+        lower_bound=lower_bound,
+        upper_bound=upper_bound,
+        within_interval=lower_bound <= actual_demand <= upper_bound,
+    )
+    statement = statement.on_conflict_do_update(
+        constraint="uq_prediction_evaluations_station_fuel_tick",
+        set_={
+            "model": statement.excluded.model,
+            "predicted_demand": statement.excluded.predicted_demand,
+            "actual_demand": statement.excluded.actual_demand,
+            "absolute_error": statement.excluded.absolute_error,
+            "lower_bound": statement.excluded.lower_bound,
+            "upper_bound": statement.excluded.upper_bound,
+            "within_interval": statement.excluded.within_interval,
+        },
+    )
+    await session.execute(statement)
+
+
+async def read_demand_history(
+    session: AsyncSession,
+    *,
+    limit: int = 5000,
+) -> list[DemandObservationRow]:
+    """Read the stored demand history, oldest first.
+
+    The forecaster needs the series in order, and the limit keeps the query
+    bounded no matter how large the table has grown.
+    """
+    result = await session.execute(
+        select(DemandObservationRow).order_by(DemandObservationRow.tick.desc()).limit(limit)
+    )
+    rows = list(result.scalars())
+    rows.reverse()
+    return rows
 
 
 # -- alerts -----------------------------------------------------------------

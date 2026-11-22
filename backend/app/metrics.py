@@ -117,6 +117,69 @@ DEMAND_INGESTED = Counter(
     ["outcome"],
 )
 
+#: Mean absolute error of the demand forecast, in litres, by model.
+PREDICTION_ERROR_MAE = Gauge(
+    "prediction_error_mae_liters",
+    "Mean absolute error of the demand forecast against the observed demand, by model.",
+    ["model"],
+)
+
+#: How many predictions landed inside their confidence interval.
+PREDICTION_INTERVAL_COVERAGE = Gauge(
+    "prediction_interval_coverage_ratio",
+    "Share of predictions whose actual demand fell inside the confidence interval.",
+    ["model"],
+)
+
+#: The mean confidence of the forecasts that were produced.
+MODEL_CONFIDENCE = Gauge(
+    "model_confidence",
+    "Mean confidence of the forecasts produced by the active model.",
+    ["model"],
+)
+
+#: How many forecasts were produced, by the model that produced them.
+FORECASTS_PRODUCED = Counter(
+    "forecasts_produced_total",
+    "Forecasts produced, by the model that produced them.",
+    ["model"],
+)
+
+#: How many risk assessments landed in each band.
+RISK_ASSESSMENTS = Counter(
+    "risk_assessments_total",
+    "Risk assessments produced, by risk level.",
+    ["level"],
+)
+
+#: How many anomalies were detected, by kind.
+ANOMALIES_DETECTED = Counter(
+    "anomalies_detected_total",
+    "Anomalies detected, by kind.",
+    ["kind"],
+)
+
+#: How many bottlenecks were detected, by kind.
+BOTTLENECKS_DETECTED = Counter(
+    "bottlenecks_detected_total",
+    "Bottlenecks detected, by kind.",
+    ["kind"],
+)
+
+#: How many times the rule-based fallback engaged, by reason.
+FALLBACK_ACTIVATIONS = Counter(
+    "fallback_activations_total",
+    "Times the rule-based predictor replaced the learned model, by reason.",
+    ["reason"],
+)
+
+#: How many forecasts were flagged for human review.
+NEEDS_HUMAN_REVIEW = Counter(
+    "needs_human_review_total",
+    "Forecasts and assessments flagged for human review, by kind.",
+    ["kind"],
+)
+
 
 def install_metrics_middleware(app: FastAPI) -> None:
     """Attach the metrics middleware and the ``/metrics`` route to an app."""

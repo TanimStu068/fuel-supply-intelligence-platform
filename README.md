@@ -4,9 +4,9 @@ Intelligent decision-support and resilience platform for a simulated fuel supply
 network. (in association
 with Poridhi.io).
 
-> **Status:** Day 2 of 7 complete. Days 3 to 7 are planned below.
+> **Status:** Day 3 of 7 complete. Days 4 to 7 are planned below.
 > Submission deadline: **26 November 2026**.
-> Latest report: [`docs/progress/day2.md`](docs/progress/day2.md)
+> Latest report: [`docs/progress/day3.md`](docs/progress/day3.md)
 
 ---
 
@@ -119,7 +119,7 @@ to `main` and an update to the company.
 |---|---|---|---|
 | 1 | 19 Nov | Foundation, simulator client, repo and CI skeleton | Done |
 | 2 | 20 Nov | Data layer, live state sync, logging and metrics | Done |
-| 3 | 21 Nov | Intelligence layer (forecast, shortage prediction, detection) | Planned |
+| 3 | 21 Nov | Intelligence layer (forecast, shortage prediction, detection) | Done |
 | 4 | 22 Nov | Decision engine, recommendations, simulate and act | Planned |
 | 5 | 23 Nov | Operator dashboard | Planned |
 | 6 | 24 Nov | Resilience, observability, crisis drills, load testing | Planned |
@@ -182,24 +182,46 @@ recover within 5 s. Ten fault-injection checks pass, and the transcripts are in
 **Goal:** a meaningful, explainable intelligence layer in
 `backend/app/intelligence/`.
 
-- [ ] Demand forecasting per (station, fuel): profile baseline (daily demand ×
-      hour factor × demand multiplier) combined with a learned model trained on
-      demand history, with confidence intervals
-- [ ] Shortage prediction: hours-to-stockout and stockout probability using
+- [x] Demand forecasting per (station, fuel): profile baseline (daily demand ×
+      hour factor × demand multiplier) combined with a learned model trained
+      on demand history, with confidence intervals
+- [x] Shortage prediction: hours-to-stockout and stockout probability using
       inventory, forecast demand and in-transit arrivals; risk levels
       `OK / WATCH / CRITICAL`
-- [ ] Detection: demand anomalies, abnormal inventory change, bottlenecks
+- [x] Detection: demand anomalies, abnormal inventory change, bottlenecks
       (dispatch capacity, route disruption, delayed supply, low depot stock)
-- [ ] Model-unavailable fallback to a rule-based predictor; low confidence sets
+- [x] Model-unavailable fallback to a rule-based predictor; low confidence sets
       `needs_human_review=true`
-- [ ] `GET /api/alerts` and `GET /api/risk` with the signals behind each score
-- [ ] Metrics: prediction error (MAE), confidence, alert rate, fallback count
-- [ ] Multi-day stepped run for training and evaluation, documented in
+- [x] `GET /api/alerts` and `GET /api/risk` with the signals behind each score
+- [x] Metrics: prediction error (MAE), confidence, alert rate, fallback count
+- [x] Multi-day stepped run for training and evaluation, documented in
       `docs/model-evaluation.md`, plus a `demand_spike` detection-time test
-- [ ] Unit tests for predictor, anomaly detector and fallback
+- [x] Unit tests for predictor, anomaly detector and fallback
 
 **Definition of done:** `/api/risk` returns sensible, explained risk per station
 and fuel, and a `demand_spike` changes the risk within a few ticks.
+
+**Verified:** a ×2.0 demand spike is detected **1 tick** after it is injected.
+On a station that still holds stock, a ×3.0 spike moves the risk level
+`OK` → `WATCH` in **2 ticks** and has fuel dispatched in **4**. The learned
+model beats the rule-based baseline by **34 %** over the forecast horizon
+(78.1 L vs 118.1 L of total demand error), and the platform refuses to use it
+when it does not. Over a six-day run, **468,000 L were dispatched in 687
+shipments with zero allocation failures**, for a service level of **0.882**.
+The full numbers, the four defects the evaluation exposed and the limitations
+are in [`docs/model-evaluation.md`](docs/model-evaluation.md).
+
+**A constraint worth knowing:** the simulator's own total supply (468,000 L
+across the depot stock and the 22 scheduled arrivals) is **25 % below** its
+total demand over a multi-day run, so service level cannot approach 1.0 no
+matter what the platform does. The unmet demand is concentrated at the station
+furthest from the depots.
+
+**How the evaluation is run matters:** the simulator has to be stepped in step
+with the platform's own sync cycle (`--step-pause 1.1`). Stepping it flat out
+lets the world run away from the platform, and the resulting service level
+measures the step rate rather than the policy — 0.763 instead of 0.882, for
+exactly the same code.
 
 ### Day 4 (22 Nov): Decision engine, recommendations, simulate and act
 
@@ -408,6 +430,11 @@ All configuration is environment-driven; **no secret is hard-coded**. Copy
 | `SSE_RECONNECT_BASE_DELAY` | `1` | SSE reconnect backoff base (seconds) |
 | `SSE_RECONNECT_MAX_DELAY` | `30` | SSE reconnect backoff ceiling (seconds) |
 | `DEMAND_HISTORY_LIMIT` | `500` | Demand rows pulled per ingest cycle |
+| `FORECAST_HORIZON_TICKS` | `96` | Forecast horizon (one simulated day) |
+| `FORECAST_MIN_CONFIDENCE` | `0.35` | Below this the rule-based predictor answers |
+| `FORECAST_MIN_TRAINING_ROWS` | `30` | Below this the learned model is not trusted |
+| `MODEL_TRAIN_INTERVAL` | `300` | Seconds between model retrains |
+| `DISPATCH_ENABLED` | `true` | Whether the dispatcher submits shipments |
 | `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | `fuel` / *change-me* / `fuel` | Database credentials |
 
 ---
@@ -471,7 +498,7 @@ with a JUnit report, frontend typecheck and build, Docker image builds with a
 live backend health check against a real simulator and Postgres, and a
 `docker compose config` validation.
 
-Current results (Day 1): 60 backend unit tests, 6 integration tests, 24 smoke
+Current results (Day 3): 204 backend unit tests, 14 integration tests, 10 fault
 checks, all passing; lint clean; CI green.
 
 ---
@@ -480,14 +507,14 @@ checks, all passing; lint clean; CI green.
 
 | # | Deliverable | Where it lives | Status |
 |---|---|---|---|
-| 1 | Working application | `docker compose up` | Skeleton + data layer (Day 1–2), complete by Day 7 |
+| 1 | Working application | `docker compose up` | Skeleton + data layer + intelligence (Days 1–3), complete by Day 7 |
 | 2 | Source repository | This repo | Ongoing |
 | 3 | Simulator integration | `backend/app/simulator_client.py` | Done (Day 1) |
-| 4 | Intelligence component | `backend/app/intelligence/` | Day 3 |
+| 4 | Intelligence component | `backend/app/intelligence/` | Done (Day 3) — forecasting, shortage risk, detection, dispatch |
 | 5 | Operator interface | `frontend/` | Day 5 |
 | 6 | Architecture diagram | Section 3 here, `docs/architecture.md` | Draft here, final Day 7 |
 | 7 | Deployment | `docker-compose.yml`, CI workflow | Compose done, CI/CD final Day 7 |
-| 8 | Observability evidence | Grafana dashboards, `/metrics`, JSON logs | Metrics and logs done (Day 2), dashboards Day 6 |
+| 8 | Observability evidence | Grafana dashboards, `/metrics`, JSON logs | Metrics and logs done (Days 2–3), dashboards Day 6 |
 | 9 | Resilience demonstration | `docs/fault-tests.md`, `docs/resilience-report.md` | Fault tests done (Day 2), full report Day 6 |
 | 10 | Load-test evidence | `docs/load-test-report.md` | Day 6 |
 | 11 | Final demo | `docs/demo-script.md` | Day 7 |
