@@ -27,6 +27,7 @@ from .models import (
     DomainEventRow,
     InventorySnapshot,
     PredictionEvaluation,
+    Recommendation,
     RiskAssessmentRow,
     StateSnapshot,
     SystemHealth,
@@ -506,6 +507,86 @@ async def write_decision_record(
             payload=json.dumps(payload or {}, default=str),
         )
     )
+
+
+# -- recommendations --------------------------------------------------------
+
+
+async def write_recommendation(
+    session: AsyncSession,
+    *,
+    recommendation: Any,
+    simulator_response: str | None = None,
+) -> None:
+    """Write a recommendation to the decision history.
+
+    The row is upserted on the recommendation's own id, so a
+    recommendation that moves from PROPOSED to SUBMITTED to ARRIVED is one
+    row that changes, not three rows that contradict each other.
+    """
+    payload = recommendation.to_payload()
+    inputs_snapshot = json.dumps(
+        {
+            "signals": payload["signals"],
+            "constraints": payload["constraints"],
+            "projection": payload["projection"],
+            "alternatives": payload["alternatives"],
+        },
+        default=str,
+    )
+
+    values = {
+        "recommendation_id": recommendation.id,
+        "station_id": recommendation.station_id,
+        "fuel_type": recommendation.fuel_type,
+        "source_depot_id": recommendation.source_depot_id,
+        "route_id": recommendation.route_id,
+        "quantity": recommendation.quantity,
+        "status": recommendation.status.value,
+        "risk_level": recommendation.risk_level,
+        "hours_to_stockout": recommendation.hours_to_stockout,
+        "confidence": recommendation.confidence,
+        "needs_human_review": recommendation.needs_human_review,
+        "used_fallback_policy": recommendation.used_fallback_policy,
+        "idempotency_key": recommendation.idempotency_key,
+        "rationale": recommendation.rationale,
+        "sim_tick": recommendation.sim_tick,
+        "decided_by": recommendation.decided_by,
+        "decided_at": recommendation.decided_at,
+        "allocation_id": recommendation.allocation_id,
+        "error_code": recommendation.error_code,
+        "error_message": recommendation.error_message,
+        "inputs_snapshot": inputs_snapshot,
+        "simulator_response": simulator_response,
+    }
+
+    statement = (
+        pg_insert(Recommendation)
+        .values(**values)
+        .on_conflict_do_update(
+            index_elements=[Recommendation.recommendation_id],
+            set_={key: value for key, value in values.items() if key != "recommendation_id"},
+        )
+    )
+    await session.execute(statement)
+
+
+async def read_recommendations(
+    session: AsyncSession,
+    *,
+    limit: int = 100,
+    status: str | None = None,
+    station_id: str | None = None,
+) -> list[Recommendation]:
+    """Read the decision history, newest first."""
+    statement = select(Recommendation).order_by(Recommendation.created_at.desc())
+    if status:
+        statement = statement.where(Recommendation.status == status.upper())
+    if station_id:
+        statement = statement.where(Recommendation.station_id == station_id)
+    statement = statement.limit(limit)
+    result = await session.execute(statement)
+    return list(result.scalars())
 
 
 # -- health -----------------------------------------------------------------

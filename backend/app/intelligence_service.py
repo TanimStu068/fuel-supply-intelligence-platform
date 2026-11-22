@@ -28,8 +28,18 @@ from .intelligence.engine import IntelligenceEngine, IntelligenceResult
 from .intelligence.forecasting import HistoryPoint, LearnedModelUnavailable
 from .intelligence.risk import RiskLevel
 from .metrics import (
+    ALLOCATION_CONFLICTS,
+    ALLOCATION_CONFLICTS_BY_CODE,
     ANOMALIES_DETECTED,
     BOTTLENECKS_DETECTED,
+    DECISION_APPROVAL_RATE,
+    DECISION_FALLBACK_ACTIVATIONS,
+    DECISIONS_APPROVED,
+    DECISIONS_AUTO_APPROVED,
+    DECISIONS_PER_MINUTE,
+    DECISIONS_PROPOSED,
+    DECISIONS_REJECTED,
+    DECISIONS_SUBMITTED,
     FALLBACK_ACTIVATIONS,
     FORECASTS_PRODUCED,
     MODEL_CONFIDENCE,
@@ -45,6 +55,7 @@ from .repository import (
     write_decision_record,
     write_demand_forecast,
     write_prediction_evaluation,
+    write_recommendation,
     write_risk_assessment,
 )
 from .state_cache import StateCache
@@ -67,6 +78,7 @@ class IntelligenceService:
         engine: IntelligenceEngine,
         dispatcher: Dispatcher | None = None,
         client: Any | None = None,
+        decision: Any | None = None,
     ) -> None:
         self._database = database
         self._cache = cache
@@ -75,10 +87,16 @@ class IntelligenceService:
         #: The simulator client, used to read the current tick before
         #: dispatching. Optional: without it the cached tick is used.
         self._client = client
+        #: The decision service, which owns the recommendations. When it
+        #: is present the platform proposes allocations for a human to
+        #: approve instead of shipping fuel on its own.
+        self._decision = decision
         #: The most recent result, for the API to serve.
         self._last_result: IntelligenceResult | None = None
         #: The most recent dispatch decisions.
         self._last_decisions: list[DispatchDecision] = []
+        #: The most recent recommendations.
+        self._last_recommendations: list[Any] = []
 
     @property
     def engine(self) -> IntelligenceEngine:
@@ -94,6 +112,15 @@ class IntelligenceService:
     def last_decisions(self) -> list[DispatchDecision]:
         """The most recent dispatch decisions."""
         return self._last_decisions
+
+    @property
+    def last_recommendations(self) -> list[Any]:
+        """The most recent allocation recommendations."""
+        return self._last_recommendations
+
+    def cache_state(self) -> Any | None:
+        """The cached snapshot of the world, if there is one."""
+        return self._cache.state
 
     async def evaluate_and_store(self) -> IntelligenceResult | None:
         """Run the engine over the cached state and persist the results."""
@@ -125,9 +152,145 @@ class IntelligenceService:
         self._update_metrics(result)
         await self._persist(result)
         await self._score_previous_predictions()
-        await self._dispatch(result)
+        await self._reconcile()
+        await self._recommend(result)
 
         return result
+
+    async def _recommend(self, result: IntelligenceResult) -> None:
+        """Propose allocations for the stations that need them.
+
+        This is the human-in-the-loop path: the engine *proposes*, and
+        nothing is sent to the simulator until a human approves it. The
+        old dispatcher, which shipped on its own, is only used when the
+        decision service is not wired in.
+        """
+        if self._decision is None:
+            await self._dispatch(result)
+            return
+
+        state = self._cache.state
+        if state is None:
+            return
+
+        from .decision.builder import build_world
+
+        world = build_world(
+            tick=state.instance.tick,
+            sim_time=state.instance.sim_time,
+            tick_minutes=state.instance.tick_minutes,
+            depots=list(state.depots),
+            stations=list(state.stations),
+            routes=list(state.routes),
+            allocations=list(state.allocations),
+            supply_arrivals=list(state.supply_arrivals),
+        )
+
+        try:
+            recommendations = self._decision.optimizer.propose(
+                world=world,
+                risks=result.risks,
+                fallback=self._decision.fallback_reason is not None,
+            )
+        except Exception as exc:
+            logger.warning("could not propose allocations: %s", exc)
+            return
+
+        await self._decision.propose(
+            recommendations, fallback=self._decision.fallback_reason is not None
+        )
+        self._last_recommendations = recommendations
+        self._update_decision_metrics()
+
+        # The decision history is the audit trail, so it is written even
+        # when nobody approves anything.
+        await self._persist_recommendations(recommendations)
+
+    async def _persist_recommendations(self, recommendations: list[Any]) -> None:
+        """Write the recommendations to the decision history."""
+        if not recommendations:
+            return
+        try:
+            async with self._database.session() as session:
+                for recommendation in recommendations:
+                    await write_recommendation(
+                        session,
+                        recommendation=recommendation,
+                        simulator_response=json.dumps(
+                            recommendation.simulator_response or {}, default=str
+                        ),
+                    )
+                await session.commit()
+        except Exception as exc:
+            logger.warning("could not persist recommendations: %s", exc)
+
+    def _update_decision_metrics(self) -> None:
+        """Publish the decision series."""
+        if self._decision is None:
+            return
+        counters = self._decision.counters
+        for name, value in counters.items():
+            if name == "proposed":
+                DECISIONS_PROPOSED.set(value)
+            elif name == "approved":
+                DECISIONS_APPROVED.set(value)
+            elif name == "rejected":
+                DECISIONS_REJECTED.set(value)
+            elif name == "submitted":
+                DECISIONS_SUBMITTED.set(value)
+            elif name == "auto_approved":
+                DECISIONS_AUTO_APPROVED.set(value)
+            elif name == "conflicts":
+                ALLOCATION_CONFLICTS.set(value)
+        for code, count in self._decision.conflicts_by_code.items():
+            ALLOCATION_CONFLICTS_BY_CODE.labels(code=code).set(count)
+
+        proposed = counters.get("proposed", 0)
+        approved = counters.get("approved", 0)
+        DECISION_APPROVAL_RATE.set(round(approved / proposed, 4) if proposed else 0.0)
+        DECISIONS_PER_MINUTE.set(self._decision.decisions_per_minute)
+
+        fallback_reason = self._decision.fallback_reason
+        if fallback_reason:
+            DECISION_FALLBACK_ACTIVATIONS.labels(reason=fallback_reason).inc()
+            self._decision.set_fallback_reason(None)
+
+    async def _reconcile(self) -> None:
+        """Close the loop on the shipments the simulator has since resolved.
+
+        The simulator is the source of truth for what happened to a
+        shipment. Without this step a recommendation would sit at
+        SUBMITTED forever, and the decision history would never show the
+        outcome.
+        """
+        if self._decision is None:
+            return
+        state = self._cache.state
+        if state is None:
+            return
+
+        reconciled = self._decision.reconcile(list(state.allocations))
+        if reconciled:
+            logger.info("reconciled %d allocation(s) with the simulator", reconciled)
+            await self._persist_decision_history()
+
+    async def _persist_decision_history(self) -> None:
+        """Write the resolved recommendations to the audit trail."""
+        if self._decision is None:
+            return
+        try:
+            async with self._database.session() as session:
+                for recommendation in self._decision.list_recommendations():
+                    await write_recommendation(
+                        session,
+                        recommendation=recommendation,
+                        simulator_response=json.dumps(
+                            recommendation.simulator_response or {}, default=str
+                        ),
+                    )
+                await session.commit()
+        except Exception as exc:
+            logger.warning("could not persist the decision history: %s", exc)
 
     async def _dispatch(self, result: IntelligenceResult) -> None:
         """Move fuel to the stations that need it.
@@ -180,7 +343,7 @@ class IntelligenceService:
         if client is None:
             return fallback
         try:
-            instance = await client.instance()
+            instance = await client.get_instance()
         except Exception as exc:
             logger.warning("could not read the current tick; using the cached one: %s", exc)
             return fallback

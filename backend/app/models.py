@@ -199,6 +199,63 @@ class Alert(Base):
     payload: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
+class Recommendation(Base):
+    """One proposed allocation, and everything that happened to it.
+
+    This is the decision history and the audit trail in one table. It
+    records *who* decided, *when*, the exact inputs the recommendation was
+    made from (as a JSON snapshot), the simulator's response, and the
+    outcome once the allocation's status is known.
+
+    ``inputs_snapshot`` is the important column: it holds the signals and
+    the constraint checks exactly as the operator saw them, so a decision
+    can be explained months later without re-running the model.
+    """
+
+    __tablename__ = "recommendations"
+    __table_args__ = (
+        UniqueConstraint("recommendation_id", name="uq_recommendations_id"),
+        Index("ix_recommendations_status", "status"),
+        Index("ix_recommendations_station", "station_id", "sim_tick"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
+    #: The engine's own identifier for the recommendation.
+    recommendation_id: Mapped[str] = mapped_column(String(150), index=True)
+    station_id: Mapped[str] = mapped_column(String(64), index=True)
+    fuel_type: Mapped[str] = mapped_column(String(16))
+    source_depot_id: Mapped[str] = mapped_column(String(64))
+    route_id: Mapped[str] = mapped_column(String(64))
+    quantity: Mapped[float] = mapped_column(Float)
+    #: PROPOSED / APPROVED / SUBMITTED / ARRIVED / FAILED / REJECTED.
+    status: Mapped[str] = mapped_column(String(32), index=True)
+    risk_level: Mapped[str] = mapped_column(String(16))
+    hours_to_stockout: Mapped[float | None] = mapped_column(Float, nullable=True)
+    confidence: Mapped[float] = mapped_column(Float)
+    needs_human_review: Mapped[bool] = mapped_column(Boolean, default=True)
+    #: True when the fallback policy produced this recommendation.
+    used_fallback_policy: Mapped[bool] = mapped_column(Boolean, default=False)
+    idempotency_key: Mapped[str] = mapped_column(String(150))
+    rationale: Mapped[str] = mapped_column(Text)
+    #: The tick the recommendation was made against.
+    sim_tick: Mapped[int] = mapped_column(Integer, index=True)
+    #: Who decided, and when.
+    decided_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    #: The simulator's allocation id, once it has one.
+    allocation_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    #: The simulator's error code, when it rejected the allocation.
+    error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    #: The signals, constraints, projection and alternatives, as JSON.
+    inputs_snapshot: Mapped[str] = mapped_column(Text)
+    #: The simulator's response, as JSON.
+    simulator_response: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
 class DecisionRecord(Base):
     """Audit trail of decisions the platform takes (filled in later days)."""
 

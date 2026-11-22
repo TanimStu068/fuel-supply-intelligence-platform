@@ -120,7 +120,7 @@ to `main` and an update to the company.
 | 1 | 19 Nov | Foundation, simulator client, repo and CI skeleton | Done |
 | 2 | 20 Nov | Data layer, live state sync, logging and metrics | Done |
 | 3 | 21 Nov | Intelligence layer (forecast, shortage prediction, detection) | Done |
-| 4 | 22 Nov | Decision engine, recommendations, simulate and act | Planned |
+| 4 | 22 Nov | Decision engine, recommendations, simulate and act | Done |
 | 5 | 23 Nov | Operator dashboard | Planned |
 | 6 | 24 Nov | Resilience, observability, crisis drills, load testing | Planned |
 | 7 | 25 Nov | CI/CD, tests, docs, demo prep, release `v1.0.0` | Planned |
@@ -227,25 +227,26 @@ exactly the same code.
 
 **Goal:** recommend valid allocations, explain them, and require human approval.
 
-- [ ] Constraint-aware allocator in `backend/app/decision/` that pre-validates
+- [x] Constraint-aware allocator in `backend/app/decision/` that pre-validates
       all simulator rules (route mismatch, depot/station closed, route disrupted,
       route capacity, inventory, dispatch capacity, destination capacity)
-- [ ] Route choice among alternatives, shipment splitting above `max_shipment`,
+- [x] Route choice among alternatives, shipment splitting above `max_shipment`,
       transit-time awareness
-- [ ] Each recommendation includes before/after risk, signals, constraints,
+- [x] Each recommendation includes before/after risk, signals, constraints,
       confidence and 1 to 2 ranked alternatives
-- [ ] What-if endpoint `POST /api/recommendations/{id}/simulate` (no simulator write)
-- [ ] Approval flow: `PROPOSED` → approve (sends `POST /v1/allocations` with a
+- [x] What-if endpoint `POST /api/recommendations/{id}/simulate` (no simulator write)
+- [x] Approval flow: `PROPOSED` → approve (sends `POST /v1/allocations` with a
       deterministic idempotency key) or reject; every 409 handled with a clear reason
-- [ ] Decision history and audit trail reconciled with allocation outcome
-- [ ] Optional auto-mode (default OFF) for low-risk, high-confidence actions
-- [ ] Fallback policy (refill lowest days-of-cover first) if intelligence is down
-- [ ] Metrics: decisions per minute, approval rate, fallbacks, 409 counts by code
-- [ ] Tests for every 409 case; policy vs naive baseline compared on
-      `service_level` in `docs/policy-comparison.md`
+- [x] Decision history and audit trail reconciled with allocation outcome
+- [x] Optional auto-mode (default OFF) for low-risk, high-confidence actions
+- [x] Fallback policy (refill lowest days-of-cover first) if intelligence is down
+- [x] Metrics: decisions per minute, approval rate, fallbacks, 409 counts by code
+- [x] Tests for every 409 case; policy vs naive baseline compared on
+      `service_level` in [`docs/policy-comparison.md`](docs/policy-comparison.md)
 
 **Definition of done:** the system proposes an allocation, a human approves it,
-and it reaches `ARRIVED` with improved risk.
+and it reaches `ARRIVED` with improved risk. — **Proven live**; see
+[`docs/progress/day4.md`](docs/progress/day4.md).
 
 ### Day 5 (23 Nov): Operator dashboard
 
@@ -511,6 +512,7 @@ checks, all passing; lint clean; CI green.
 | 2 | Source repository | This repo | Ongoing |
 | 3 | Simulator integration | `backend/app/simulator_client.py` | Done (Day 1) |
 | 4 | Intelligence component | `backend/app/intelligence/` | Done (Day 3) — forecasting, shortage risk, detection, dispatch |
+| 4b | Decision engine | `backend/app/decision/` | Done (Day 4) — constraint-aware allocation with human approval |
 | 5 | Operator interface | `frontend/` | Day 5 |
 | 6 | Architecture diagram | Section 3 here, `docs/architecture.md` | Draft here, final Day 7 |
 | 7 | Deployment | `docker-compose.yml`, CI workflow | Compose done, CI/CD final Day 7 |

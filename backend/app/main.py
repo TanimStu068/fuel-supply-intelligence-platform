@@ -20,6 +20,7 @@ last-known state and says so, with a ``degraded`` flag and an age.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -28,10 +29,12 @@ from typing import Any
 from fastapi import Depends, FastAPI, HTTPException, Path, Query, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
 
 from .config import get_settings
 from .db import Database
 from .db import database as default_database
+from .decision.service import DecisionError, DecisionService
 from .intelligence.dispatcher import Dispatcher
 from .intelligence.engine import IntelligenceEngine
 from .intelligence.forecasting import ForecastSelector, ForecastSelectorConfig
@@ -72,6 +75,11 @@ async def lifespan(app: FastAPI):
     app.state.simulator = build_client(settings)
     app.state.database = default_database
     app.state.cache = StateCache()
+    app.state.decision = DecisionService(
+        app.state.simulator,
+        repository=app.state.database,
+        database=app.state.database,
+    )
     app.state.intelligence = IntelligenceService(
         database=app.state.database,
         cache=app.state.cache,
@@ -88,6 +96,7 @@ async def lifespan(app: FastAPI):
             app.state.simulator,
             enabled=settings.dispatch_enabled,
         ),
+        decision=app.state.decision,
         client=app.state.simulator,
     )
     app.state.sync = SyncService(
@@ -160,6 +169,59 @@ def get_cache(request: Request) -> StateCache:
 def get_sync(request: Request) -> SyncService:
     """Return the process-wide sync service."""
     return request.app.state.sync
+
+
+def get_intelligence(request: Request) -> IntelligenceService:
+    """Return the process-wide intelligence service."""
+    return request.app.state.intelligence
+
+
+def get_decision(request: Request) -> DecisionService:
+    """Return the process-wide decision service."""
+    return request.app.state.decision
+
+
+# -- request bodies ---------------------------------------------------------
+
+
+class ApprovalRequest(BaseModel):
+    """The body of an approval request."""
+
+    #: Who approved it. The audit trail needs a name.
+    decided_by: str = Field(default="operator", max_length=64)
+    #: Whether to send it to the simulator straight away.
+    submit: bool = True
+
+
+class RejectionRequest(BaseModel):
+    """The body of a rejection request."""
+
+    decided_by: str = Field(default="operator", max_length=64)
+    reason: str = Field(default="", max_length=500)
+
+
+class DecisionSettingsRequest(BaseModel):
+    """The body of a settings update."""
+
+    #: The auto-approve mode. Off by default.
+    auto_mode: bool = False
+
+
+async def persist_decision(recommendation: Any) -> None:
+    """Write one recommendation to the audit trail."""
+    from .repository import write_recommendation
+
+    database = default_database
+    try:
+        async with database.session() as session:
+            await write_recommendation(
+                session,
+                recommendation=recommendation,
+                simulator_response=json.dumps(recommendation.simulator_response or {}, default=str),
+            )
+            await session.commit()
+    except Exception as exc:
+        logger.warning("could not persist the decision: %s", exc)
 
 
 # -- health ----------------------------------------------------------------
@@ -420,11 +482,6 @@ async def get_alerts(
 # -- intelligence -----------------------------------------------------------
 
 
-def get_intelligence(request: Request) -> IntelligenceService:
-    """Return the process-wide intelligence service."""
-    return request.app.state.intelligence
-
-
 @app.get("/api/risk", tags=["intelligence"])
 async def get_risk(
     station_id: str | None = Query(default=None),
@@ -581,6 +638,240 @@ async def get_model_status(
             if learned
             else {"trained": False}
         ),
+    }
+
+
+@app.get("/api/recommendations", tags=["decision"])
+async def get_recommendations(
+    status: str | None = Query(default=None, description="Filter by status."),
+    station_id: str | None = Query(default=None, description="Filter by station."),
+    service: DecisionService = Depends(get_decision),
+) -> dict[str, Any]:
+    """Return the allocation recommendations, newest first.
+
+    Each recommendation carries everything an operator needs to judge it:
+    the station, fuel, depot and route, the quantity, the projected
+    stockout before and after, the signals that drove it, the constraints
+    that were considered, a confidence, and the alternatives that were
+    ranked and rejected.
+    """
+    recommendations = service.list_recommendations(status=status, station_id=station_id)
+    return {
+        "count": len(recommendations),
+        "auto_mode": service.auto_mode,
+        "fallback_reason": service.fallback_reason,
+        "recommendations": [item.to_payload() for item in recommendations],
+    }
+
+
+@app.get("/api/recommendations/{recommendation_id}", tags=["decision"])
+async def get_recommendation(
+    recommendation_id: str = Path(..., description="The recommendation's id."),
+    service: DecisionService = Depends(get_decision),
+) -> dict[str, Any]:
+    """Return one recommendation."""
+    recommendation = service.get(recommendation_id)
+    if recommendation is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"no recommendation with id {recommendation_id}",
+        )
+    return recommendation.to_payload()
+
+
+@app.post("/api/recommendations/{recommendation_id}/simulate", tags=["decision"])
+async def simulate_recommendation(
+    recommendation_id: str = Path(..., description="The recommendation's id."),
+    service: DecisionService = Depends(get_decision),
+) -> dict[str, Any]:
+    """Project what would happen if this recommendation were approved.
+
+    The projection is **local**. Nothing is written to the simulator and
+    the recommendation's status does not change — this is the "simulate"
+    step of the brief's loop, before the "act" step.
+    """
+    try:
+        return service.simulate(recommendation_id)
+    except DecisionError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
+@app.post("/api/recommendations/{recommendation_id}/approve", tags=["decision"])
+async def approve_recommendation(
+    recommendation_id: str = Path(..., description="The recommendation's id."),
+    body: ApprovalRequest | None = None,
+    service: DecisionService = Depends(get_decision),
+) -> dict[str, Any]:
+    """Approve a recommendation and submit it to the simulator.
+
+    The submission uses the recommendation's deterministic idempotency key,
+    so approving twice is a **replay** rather than a second shipment.
+    Every 409 the simulator can return is handled and explained.
+    """
+    payload = body or ApprovalRequest()
+    try:
+        recommendation = await service.approve(
+            recommendation_id,
+            decided_by=payload.decided_by,
+            submit=payload.submit,
+        )
+    except DecisionError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+    await persist_decision(recommendation)
+    return recommendation.to_payload()
+
+
+@app.post("/api/recommendations/{recommendation_id}/reject", tags=["decision"])
+async def reject_recommendation(
+    recommendation_id: str = Path(..., description="The recommendation's id."),
+    body: RejectionRequest | None = None,
+    service: DecisionService = Depends(get_decision),
+) -> dict[str, Any]:
+    """Reject a recommendation. Nothing is sent to the simulator."""
+    payload = body or RejectionRequest()
+    try:
+        recommendation = service.reject(
+            recommendation_id,
+            decided_by=payload.decided_by,
+            reason=payload.reason,
+        )
+    except DecisionError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+    await persist_decision(recommendation)
+    return recommendation.to_payload()
+
+
+@app.post("/api/recommendations/propose", tags=["decision"])
+async def propose_recommendations(
+    service: IntelligenceService = Depends(get_intelligence),
+    decision: DecisionService = Depends(get_decision),
+) -> dict[str, Any]:
+    """Ask the engine for recommendations right now.
+
+    The background sync proposes on every cycle; this endpoint forces a
+    fresh pass, which is what the operator dashboard calls after a change.
+    """
+    state = service.cache_state()
+    if state is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="the platform has no state yet; the simulator is not reachable",
+        )
+
+    from .decision.builder import build_world
+
+    world = build_world(
+        tick=state.instance.tick,
+        sim_time=state.instance.sim_time,
+        tick_minutes=state.instance.tick_minutes,
+        depots=list(state.depots),
+        stations=list(state.stations),
+        routes=list(state.routes),
+        allocations=list(state.allocations),
+        supply_arrivals=list(state.supply_arrivals),
+    )
+
+    risks = service.last_result.risks if service.last_result else []
+    recommendations = decision.optimizer.propose(
+        world=world,
+        risks=risks,
+        fallback=decision.fallback_reason is not None,
+    )
+    await decision.propose(recommendations, fallback=decision.fallback_reason is not None)
+
+    return {
+        "count": len(recommendations),
+        "recommendations": [item.to_payload() for item in recommendations],
+    }
+
+
+@app.get("/api/decision-settings", tags=["decision"])
+async def get_decision_settings(
+    service: DecisionService = Depends(get_decision),
+) -> dict[str, Any]:
+    """Report the decision engine's settings and counters."""
+    counters = service.counters
+    proposed = counters.get("proposed", 0)
+    approved = counters.get("approved", 0)
+    return {
+        "auto_mode": service.auto_mode,
+        "fallback_reason": service.fallback_reason,
+        "counters": counters,
+        "approval_rate": round(approved / proposed, 4) if proposed else 0.0,
+        "conflicts_by_code": service.conflicts_by_code,
+        "policy": {
+            "approach": "priority-greedy",
+            "target_cover_hours": service.optimizer.config.target_cover_hours,
+            "min_shipment_liters": service.optimizer.config.min_shipment_liters,
+            "max_alternatives": service.optimizer.config.max_alternatives,
+        },
+    }
+
+
+@app.post("/api/decision-settings", tags=["decision"])
+async def update_decision_settings(
+    body: DecisionSettingsRequest,
+    service: DecisionService = Depends(get_decision),
+) -> dict[str, Any]:
+    """Turn the auto-approve mode on or off.
+
+    The auto-mode is **off by default**. When it is on it still only
+    approves a narrow class of action: a WATCH-level station, a confident
+    forecast, no human-review flag, and every constraint satisfied.
+    """
+    service.set_auto_mode(body.auto_mode)
+    return {
+        "auto_mode": service.auto_mode,
+        "counters": service.counters,
+    }
+
+
+@app.get("/api/decision-history", tags=["decision"])
+async def get_decision_history(
+    limit: int = Query(default=50, ge=1, le=500),
+    status: str | None = Query(default=None),
+    station_id: str | None = Query(default=None),
+    database: Database = Depends(get_database),
+) -> dict[str, Any]:
+    """The decision history from Postgres — the audit trail."""
+    from .repository import read_recommendations
+
+    try:
+        async with database.session() as session:
+            rows = await read_recommendations(
+                session, limit=limit, status=status, station_id=station_id
+            )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"could not read the decision history: {exc}",
+        ) from exc
+
+    return {
+        "count": len(rows),
+        "decisions": [
+            {
+                "recommendation_id": row.recommendation_id,
+                "station_id": row.station_id,
+                "fuel_type": row.fuel_type,
+                "source_depot_id": row.source_depot_id,
+                "route_id": row.route_id,
+                "quantity": row.quantity,
+                "status": row.status,
+                "risk_level": row.risk_level,
+                "confidence": row.confidence,
+                "decided_by": row.decided_by,
+                "decided_at": row.decided_at.isoformat() if row.decided_at else None,
+                "allocation_id": row.allocation_id,
+                "error_code": row.error_code,
+                "rationale": row.rationale,
+                "sim_tick": row.sim_tick,
+                "created_at": row.created_at.isoformat() if row.created_at else None,
+            }
+            for row in rows
+        ],
     }
 
 

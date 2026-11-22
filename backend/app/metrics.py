@@ -180,6 +180,68 @@ NEEDS_HUMAN_REVIEW = Counter(
     ["kind"],
 )
 
+#: How many allocation recommendations the engine has proposed.
+DECISIONS_PROPOSED = Gauge(
+    "decisions_proposed_total",
+    "Allocation recommendations proposed by the decision engine.",
+)
+
+#: How many recommendations a human has approved.
+DECISIONS_APPROVED = Gauge(
+    "decisions_approved_total",
+    "Allocation recommendations approved by an operator.",
+)
+
+#: How many recommendations a human has rejected.
+DECISIONS_REJECTED = Gauge(
+    "decisions_rejected_total",
+    "Allocation recommendations rejected by an operator.",
+)
+
+#: How many recommendations were submitted to the simulator.
+DECISIONS_SUBMITTED = Gauge(
+    "decisions_submitted_total",
+    "Allocation recommendations submitted to the simulator.",
+)
+
+#: How many recommendations the auto-mode approved on its own.
+DECISIONS_AUTO_APPROVED = Gauge(
+    "decisions_auto_approved_total",
+    "Allocation recommendations approved by the auto-mode, without a human.",
+)
+
+#: How many submissions the simulator refused with a 409.
+ALLOCATION_CONFLICTS = Gauge(
+    "allocation_conflicts_total",
+    "Allocation submissions the simulator refused with a conflict.",
+)
+
+#: The 409 codes the simulator returned, by code.
+ALLOCATION_CONFLICTS_BY_CODE = Gauge(
+    "allocation_conflicts_by_code_total",
+    "Allocation submissions the simulator refused, by error code.",
+    ["code"],
+)
+
+#: The share of proposed recommendations that a human approved.
+DECISION_APPROVAL_RATE = Gauge(
+    "decision_approval_rate",
+    "Share of proposed allocation recommendations that were approved.",
+)
+
+#: How many times the decision layer fell back to the rule-based policy.
+DECISION_FALLBACK_ACTIVATIONS = Counter(
+    "decision_fallback_activations_total",
+    "Times the decision engine used the rule-based fallback policy, by reason.",
+    ["reason"],
+)
+
+#: How many decisions were made in the last minute.
+DECISIONS_PER_MINUTE = Gauge(
+    "decisions_per_minute",
+    "Allocation recommendations proposed in the last minute.",
+)
+
 
 def install_metrics_middleware(app: FastAPI) -> None:
     """Attach the metrics middleware and the ``/metrics`` route to an app."""
