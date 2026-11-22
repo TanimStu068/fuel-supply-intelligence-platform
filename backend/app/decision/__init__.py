@@ -22,6 +22,7 @@ The modules:
 """
 
 from .constraints import ConstraintCode, ConstraintReport, ConstraintViolation
+from .fallback import FallbackPolicy, FallbackRisk, StationProfile
 from .models import (
     Alternative,
     Recommendation,
@@ -52,11 +53,14 @@ __all__ = [
     "DecisionError",
     "DecisionService",
     "DepotSnapshot",
+    "FallbackPolicy",
+    "FallbackRisk",
     "OptimizerConfig",
     "Recommendation",
     "RecommendationStatus",
     "RiskProjection",
     "RouteSnapshot",
+    "StationProfile",
     "StationSnapshot",
     "SupplyArrivalSnapshot",
     "WorldSnapshot",

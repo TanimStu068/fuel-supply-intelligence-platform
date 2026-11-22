@@ -18,7 +18,7 @@ class of low-risk, high-confidence action).
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import StrEnum
 
 
@@ -156,7 +156,7 @@ class Recommendation:
     #: One line explaining the recommendation.
     rationale: str = ""
 
-    created_at: datetime = field(default_factory=lambda: datetime.now())
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     #: When a human approved or rejected it, and who.
     decided_at: datetime | None = None
     decided_by: str | None = None

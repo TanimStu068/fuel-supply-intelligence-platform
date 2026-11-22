@@ -306,7 +306,7 @@ def test_the_optimizer_proposes_a_valid_allocation() -> None:
 
     recommendations = optimizer.propose(world=build_world(), risks=[build_risk()])
 
-    assert len(recommendations) == 1
+    assert recommendations
     recommendation = recommendations[0]
     assert recommendation.station_id == "station-mirpur"
     assert recommendation.fuel_type == "DIESEL"
@@ -360,8 +360,8 @@ def test_the_optimizer_falls_back_to_the_backup_route() -> None:
 
     recommendations = optimizer.propose(world=world, risks=[build_risk()])
 
-    assert len(recommendations) == 1
-    assert recommendations[0].route_id == "route-patiya-mirpur"
+    assert recommendations
+    assert all(item.route_id == "route-patiya-mirpur" for item in recommendations)
 
 
 def test_the_optimizer_records_the_rejected_route_as_an_alternative() -> None:
@@ -416,6 +416,105 @@ def test_the_shipment_never_exceeds_the_depot_stock() -> None:
     for recommendation in recommendations:
         depot = world.depots[recommendation.source_depot_id]
         assert recommendation.quantity <= depot.inventory[recommendation.fuel_type]
+
+
+def test_a_deficit_above_the_route_limit_is_split() -> None:
+    """A deficit the route cannot carry in one go goes out in parts.
+
+    The simulator refuses any single allocation above the route's
+    ``max_shipment``, so a bigger deficit has to be split.
+    """
+    optimizer = AllocationOptimizer()
+    # A station with a lot of room and a big forecast, so the deficit is
+    # larger than any one route can carry.
+    world = build_world(
+        routes=(
+            RouteSnapshot(
+                id="route-gazipur-mirpur",
+                source_depot_id="depot-gazipur",
+                destination_station_id="station-mirpur",
+                transit_ticks=2,
+                max_shipment=2_000.0,
+                status="AVAILABLE",
+            ),
+        )
+    )
+    risk = build_risk(hours_to_stockout=None, inventory=0.0)
+
+    recommendations = optimizer.propose(world=world, risks=[risk])
+
+    assert len(recommendations) > 1
+    for recommendation in recommendations:
+        assert recommendation.quantity <= 2_000.0
+
+
+def test_the_split_legs_share_one_station_and_fuel() -> None:
+    """The legs are parts of one shipment, not separate decisions."""
+    optimizer = AllocationOptimizer()
+    world = build_world(
+        routes=(
+            RouteSnapshot(
+                id="route-gazipur-mirpur",
+                source_depot_id="depot-gazipur",
+                destination_station_id="station-mirpur",
+                transit_ticks=2,
+                max_shipment=2_000.0,
+                status="AVAILABLE",
+            ),
+        )
+    )
+    risk = build_risk(hours_to_stockout=None, inventory=0.0)
+
+    recommendations = optimizer.propose(world=world, risks=[risk])
+
+    assert {item.station_id for item in recommendations} == {"station-mirpur"}
+    assert {item.fuel_type for item in recommendations} == {"DIESEL"}
+
+
+def test_the_split_legs_have_distinct_idempotency_keys() -> None:
+    """Two legs of the same size must not collide on the same key."""
+    optimizer = AllocationOptimizer()
+    world = build_world(
+        routes=(
+            RouteSnapshot(
+                id="route-gazipur-mirpur",
+                source_depot_id="depot-gazipur",
+                destination_station_id="station-mirpur",
+                transit_ticks=2,
+                max_shipment=2_000.0,
+                status="AVAILABLE",
+            ),
+        )
+    )
+    risk = build_risk(hours_to_stockout=None, inventory=0.0)
+
+    recommendations = optimizer.propose(world=world, risks=[risk])
+
+    keys = [item.idempotency_key for item in recommendations]
+    assert len(set(keys)) == len(keys)
+
+
+def test_a_split_leg_passes_every_constraint() -> None:
+    """Every leg must be acceptable to the simulator on its own."""
+    optimizer = AllocationOptimizer()
+    world = build_world(
+        routes=(
+            RouteSnapshot(
+                id="route-gazipur-mirpur",
+                source_depot_id="depot-gazipur",
+                destination_station_id="station-mirpur",
+                transit_ticks=2,
+                max_shipment=2_000.0,
+                status="AVAILABLE",
+            ),
+        )
+    )
+    risk = build_risk(hours_to_stockout=None, inventory=0.0)
+
+    recommendations = optimizer.propose(world=world, risks=[risk])
+
+    for recommendation in recommendations:
+        assert all(check["satisfied"] for check in recommendation.constraints)
 
 
 def test_the_shipment_never_exceeds_the_station_capacity() -> None:
@@ -522,11 +621,16 @@ def test_the_slow_route_is_scored_honestly() -> None:
 
 def test_the_fallback_policy_uses_a_fixed_confidence() -> None:
     """The fallback has no model behind it, so it does not claim confidence."""
-    optimizer = AllocationOptimizer()
+    from app.decision.fallback import FallbackPolicy, StationProfile
 
-    recommendation = optimizer.propose(world=build_world(), risks=[build_risk()], fallback=True)[0]
+    policy = FallbackPolicy()
+
+    recommendation = policy.propose(
+        world=build_world(),
+        profiles={"station-mirpur": StationProfile(demand_profile="urban_high")},
+    )[0]
 
     assert recommendation.used_fallback_policy is True
     assert recommendation.confidence <= 0.4
     assert recommendation.needs_human_review is True
-    assert "lowest days of cover" in recommendation.rationale
+    assert "forecast model is unavailable" in recommendation.rationale

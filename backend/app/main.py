@@ -752,6 +752,10 @@ async def propose_recommendations(
 
     The background sync proposes on every cycle; this endpoint forces a
     fresh pass, which is what the operator dashboard calls after a change.
+
+    It goes through the same shared path as the background sync, so it picks
+    the same policy: the model-driven optimizer when the intelligence layer
+    has usable forecasts, and the rule-based fallback when it does not.
     """
     state = service.cache_state()
     if state is None:
@@ -760,29 +764,11 @@ async def propose_recommendations(
             detail="the platform has no state yet; the simulator is not reachable",
         )
 
-    from .decision.builder import build_world
-
-    world = build_world(
-        tick=state.instance.tick,
-        sim_time=state.instance.sim_time,
-        tick_minutes=state.instance.tick_minutes,
-        depots=list(state.depots),
-        stations=list(state.stations),
-        routes=list(state.routes),
-        allocations=list(state.allocations),
-        supply_arrivals=list(state.supply_arrivals),
-    )
-
-    risks = service.last_result.risks if service.last_result else []
-    recommendations = decision.optimizer.propose(
-        world=world,
-        risks=risks,
-        fallback=decision.fallback_reason is not None,
-    )
-    await decision.propose(recommendations, fallback=decision.fallback_reason is not None)
+    recommendations = await service.propose_now()
 
     return {
         "count": len(recommendations),
+        "used_fallback_policy": decision.fallback_reason is not None,
         "recommendations": [item.to_payload() for item in recommendations],
     }
 
@@ -806,6 +792,10 @@ async def get_decision_settings(
             "target_cover_hours": service.optimizer.config.target_cover_hours,
             "min_shipment_liters": service.optimizer.config.min_shipment_liters,
             "max_alternatives": service.optimizer.config.max_alternatives,
+        },
+        "fallback_policy": {
+            "approach": "lowest days-of-cover first",
+            "used": service.fallback_reason is not None,
         },
     }
 

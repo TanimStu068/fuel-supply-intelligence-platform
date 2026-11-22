@@ -171,8 +171,12 @@ async def test_the_submission_uses_the_deterministic_idempotency_key() -> None:
 
     await service.approve(recommendation.id, decided_by="alice")
 
-    assert client.submitted[0]["idempotency_key"].startswith("rec-station-mirpur")
-    assert client.submitted[0]["idempotency_key"].endswith(str(int(recommendation.quantity)))
+    key = client.submitted[0]["idempotency_key"]
+    assert key.startswith("rec-station-mirpur")
+    # The key is ``rec-{station}-{fuel}-{tick}-{quantity}`` with an
+    # optional ``-{leg}`` suffix for the parts of a split shipment.
+    assert key == recommendation.idempotency_key
+    assert str(int(recommendation.quantity)) in key
 
 
 # --- every 409 the simulator can return ------------------------------------
@@ -328,10 +332,15 @@ async def test_the_auto_mode_leaves_critical_stations_to_a_human() -> None:
 @pytest.mark.asyncio
 async def test_the_auto_mode_leaves_the_fallback_policy_to_a_human() -> None:
     """A recommendation made without a model is never auto-approved."""
+    from app.decision.fallback import FallbackPolicy, StationProfile
+
     client = FakeClient()
     service = DecisionService(client)
-    optimizer = AllocationOptimizer()
-    recommendations = optimizer.propose(world=build_world(), risks=[build_risk()], fallback=True)
+    policy = FallbackPolicy()
+    recommendations = policy.propose(
+        world=build_world(),
+        profiles={"station-mirpur": StationProfile(demand_profile="urban_high")},
+    )
     service.set_auto_mode(True)
 
     await service.propose(recommendations, fallback=True)

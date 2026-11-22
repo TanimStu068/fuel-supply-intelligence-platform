@@ -4,9 +4,9 @@ Intelligent decision-support and resilience platform for a simulated fuel supply
 network. (in association
 with Poridhi.io).
 
-> **Status:** Day 3 of 7 complete. Days 4 to 7 are planned below.
+> **Status:** Day 4 of 7 complete. Days 5 to 7 are planned below.
 > Submission deadline: **26 November 2026**.
-> Latest report: [`docs/progress/day3.md`](docs/progress/day3.md)
+> Latest report: [`docs/progress/day4.md`](docs/progress/day4.md)
 
 ---
 
@@ -248,6 +248,13 @@ exactly the same code.
 and it reaches `ARRIVED` with improved risk. — **Proven live**; see
 [`docs/progress/day4.md`](docs/progress/day4.md).
 
+**Verified:** `scripts/day4_dod_proof.py` drives the whole loop against the
+running simulator — propose, what-if (no write), approve, `ARRIVED`, risk
+improved. `scripts/day4_fallback_drill.py` breaks the intelligence layer
+inside the running container and shows the rule-based policy taking over, the
+reason reaching the operator, the outage being counted once, and nothing
+reaching the simulator without a human.
+
 ### Day 5 (23 Nov): Operator dashboard
 
 **Goal:** a usable operator dashboard in `/frontend`.
@@ -330,7 +337,7 @@ Never cut: the load test, the resilience report, or the fresh-clone test.
 │   │   ├── db.py / models.py      async SQLAlchemy engine and tables
 │   │   ├── metrics.py             Prometheus instrumentation
 │   │   ├── intelligence/          (Day 3) forecasting, risk, detection
-│   │   └── decision/              (Day 4) allocator, recommendations, approvals
+│   │   └── decision/              (Day 4) allocator, fallback, recommendations, approvals
 │   └── tests/          pytest suite (mocked simulator responses)
 ├── frontend/           React + Vite + TypeScript operator dashboard
 ├── infra/              Prometheus + Grafana provisioning

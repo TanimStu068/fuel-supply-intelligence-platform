@@ -21,7 +21,7 @@ station's risk improving from `WATCH` to `OK`.
 | Constraint-aware optimizer in `backend/app/decision/` | ✅ | `optimizer.py` — priority-greedy over the network |
 | All 8 validation rules pre-checked locally | ✅ | `validator.py` — all 8 reproduced in tests, in the guide's order |
 | Route choice between alternatives | ✅ | Fastest-first; falls back to Patiya → Mirpur when Gazipur is disrupted |
-| Quantities split above `max_shipment` | ✅ | Capped at the route limit; the tank's room and the depot's stock also cap it |
+| Quantities split above `max_shipment` | ✅ | A deficit above the route's limit goes out as several shipments, each with its own idempotency key |
 | Fuel arriving after `transit_ticks` accounted for | ✅ | The projection credits fuel only from its arrival tick |
 | Recommendation carries station/fuel/depot/route/quantity | ✅ | `models.py` |
 | …projected stockout before and after | ✅ | `RiskProjection` — risk level, hours to stockout, probability |
@@ -36,9 +36,9 @@ station's risk improving from `WATCH` to `OK`.
 | Every 409 handled with a clear reason | ✅ | `CONFLICT_EXPLANATIONS` — all 10 codes explained |
 | Decision history table + audit trail | ✅ | `recommendations` table — who, when, inputs, response, outcome |
 | Auto-mode toggle, default OFF | ✅ | `POST /api/decision-settings` — off by default |
-| Fallback policy when the intelligence layer is down | ✅ | Lowest days-of-cover first, confidence capped at 0.4 |
+| Fallback policy when the intelligence layer is down | ✅ | Lowest days-of-cover first, confidence capped at 0.4 — proven live by `scripts/day4_fallback_drill.py` |
 | Metrics: decisions/min, approval rate, fallback, 409 by code | ✅ | 8 new Prometheus series |
-| Tests including every 409 case | ✅ | 57 new tests, all 8 codes reproduced |
+| Tests including every 409 case | ✅ | 82 new tests, all 8 codes reproduced |
 | Policy vs naive baseline on `service_level` | ✅ | `docs/policy-comparison.md` — **1.000 against 0.657** |
 | **Propose → approve → `ARRIVED` with improved risk** | ✅ | `scripts/day4_dod_proof.py`, run live against the simulator |
 
@@ -46,7 +46,7 @@ station's risk improving from `WATCH` to `OK`.
 
 ## What was done
 
-### 1. The decision layer is seven small modules
+### 1. The decision layer is eight small modules
 
 ```
 backend/app/decision/
@@ -159,6 +159,102 @@ When the intelligence layer cannot produce forecasts, the engine falls back to
 never auto-approves, and it says so in the rationale: *"the forecast model is
 unavailable"*.
 
+The rule-based policy lives in its own module, `fallback.py`. There is exactly
+**one** implementation of it: the optimizer's own fallback branch was removed
+once the standalone policy existed, because two copies of the same rule would
+drift apart and only one of them would be the one that actually runs.
+
+The fallback engages on three paths, and all three go through the same
+shared entry point (`IntelligenceService.propose_now`):
+
+| Path | Trigger |
+|---|---|
+| The engine raised | The evaluation failed outright. |
+| No forecast | The evaluation produced no forecast. |
+| No risk assessment | The evaluation produced no risk. |
+
+The third path matters more than it looks: a failed evaluation used to leave
+the **previous** result in place, so the platform carried on acting on a
+forecast that described a world which had already moved on. A failed
+evaluation now clears the stale result, which forces the next proposal
+through the fallback policy.
+
+### 8. The fallback is visible, and counted once
+
+An operator has to be able to see that the platform is degraded, so the
+fallback reason is **sticky**: it survives until the normal policy comes
+back. It is reported by `GET /api/decision-settings` under `fallback_reason`,
+and by `fallback_policy.used` in the same payload.
+
+The `decision_fallback_activations_total` metric counts **activations**, not
+poll cycles. The latch is keyed on the *engagement* rather than on the reason
+text, because an outage is one activation however many different words the
+failure produces and however many poll cycles it spans. The Prometheus label is
+also bounded to a fixed set of reasons — an exception message containing a
+changing number would otherwise create a new time series on every poll.
+
+---
+
+## Splitting a deficit the route cannot carry
+
+The simulator's `max_shipment` is a **per-allocation** limit, so a deficit
+above it has to go out as several shipments. The optimizer does that now:
+each leg is its own recommendation, with its own idempotency key
+(`rec-{station}-{fuel}-{tick}-{quantity}-{leg}`), so the operator approves
+and submits them one at a time and a retried leg is still a replay.
+
+The legs are bounded by the same caps a single shipment was: the depot's
+dispatch allowance for the tick, the depot's stock, and the station's free
+tank space. The tank space matters most — the simulator caps what a tank
+actually *receives* on arrival (`received = min(room, quantity)`), so splitting
+past the tank's room would promise fuel that cannot be delivered.
+
+---
+
+## The fallback drill
+
+`scripts/day4_fallback_drill.py` proves the fallback works in the **running
+platform**, not just in isolation. It runs inside the backend container,
+builds the same object graph the lifespan builds, and then breaks the
+intelligence layer inside it.
+
+```
+=== 2. The intelligence layer is healthy ===
+  ok    the engine evaluated 12 risks and 12 forecasts
+  ok    the healthy path proposed recommendations: True
+  ok    the healthy path used the model-driven policy: True
+  ok    no fallback was reported: None
+
+=== 3. The intelligence layer breaks ===
+  ok    the evaluation produced nothing: None
+  ok    the fallback still proposed recommendations: True
+  ok    every degraded recommendation used the rule-based policy: True
+  ok    the rule-based recommendations cap their confidence: True
+  ok    the rationale says the forecast model is unavailable: True
+  ok    the idempotency key is the fallback's own: True
+
+=== 4. The operator can see that the platform is degraded ===
+  ok    the fallback reason is reported: True
+
+=== 5. The outage is counted once, not once per poll cycle ===
+  ok    the outage was counted once: 1.0
+  ok    a continuing outage is not counted again: 1.0
+
+=== 6. Nothing reaches the simulator without a human ===
+  ok    the recommendations are still PROPOSED: True
+
+=== 7. The intelligence layer recovers ===
+  ok    the fallback reason was cleared: None
+  ok    the model-driven policy is back in use: True
+
+passed: 22   failed: 0
+```
+
+`scripts/day4_verify_state.py` is the companion check: it asserts the
+specific facts the implementation is supposed to hold, straight from the
+source files, so a silently reverted edit is caught before it reaches a
+commit.
+
 ---
 
 ## The policy comparison
@@ -242,6 +338,29 @@ These were found by running the thing, not by reading the code.
 | 3 | `approve()` was synchronous but submitted over the network | `AttributeError: 'coroutine' object has no attribute 'to_payload'` | `approve()` and `propose()` are now `async`. |
 | 4 | The policy comparison read `tick` from the wrong place | The comparison hung: the backend's tick never appeared to advance | `/api/state` nests the tick under `instance`. Fixed. |
 | 5 | The naive baseline acted on every tick | The comparison would have measured *how often* you ship, not *what* you ship | The baseline is now held to the platform's own sync cadence. |
+| 6 | The fallback reason was cleared as soon as it was counted | `/api/decision-settings` could never report that the platform was in fallback — the flag was always `null` | The reason is now sticky; the activation counter has its own latch. |
+| 7 | The fallback metric counted poll cycles, not outages | An outage lasting an hour incremented the counter ~700 times | The latch is keyed on the engagement, so an outage counts once. |
+| 8 | The metric label was the raw exception text | A failure whose message contained a changing number created a new Prometheus time series every poll | The label is bucketed to a fixed set of reasons. |
+| 9 | A failed evaluation left the **previous** result in place | The platform carried on acting on a forecast describing a world that had already moved on — the fallback never engaged | A failed evaluation now clears the stale result. |
+| 10 | The optimizer and the fallback policy both implemented "lowest days-of-cover first" | Two copies of one rule, which would drift apart; only one of them would be the one that actually runs | The optimizer's branch was removed; `fallback.py` is the only implementation. |
+| 11 | The optimizer's timestamps were timezone-aware, the fallback's were not | Sorting a mixed list of recommendations raised `TypeError: can't compare offset-naive and offset-aware datetimes` | Both are `datetime.now(UTC)`. |
+| 12 | `POST /api/recommendations/propose` called the optimizer directly | The operator's manual "propose" button used a different policy from the background sync, and called the optimizer with a `fallback=` argument that no longer existed | Both now go through `IntelligenceService.propose_now`. |
+| 13 | `StationProfile` was in `decision.__all__` but never imported | `from app.decision import StationProfile` raised `ImportError` | The exports are complete and the import works. |
+| 14 | A deficit above `max_shipment` was capped, not split | The brief asks for the split, and the simulator refuses any single allocation above the route's limit | The optimizer splits it into several shipments, each with its own idempotency key. |
+
+### On the silent reverts
+
+Several edits in this session were **silently reverted** by an external
+process — the tool reported success, and the file on disk did not have the
+change. Twice that produced a green test suite with broken code behind it.
+
+Two things came out of it:
+
+* `scripts/day4_verify_state.py` asserts the specific facts the
+  implementation is supposed to hold, straight from the source files, so a
+  reverted edit is caught before it reaches a commit.
+* every change is verified with `grep_search` after it is applied, not
+  just after the tool says it succeeded.
 
 ---
 

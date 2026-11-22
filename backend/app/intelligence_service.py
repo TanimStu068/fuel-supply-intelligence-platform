@@ -62,6 +62,32 @@ from .state_cache import StateCache
 
 logger = logging.getLogger(__name__)
 
+#: The bounded set of reasons the fallback can engage for. The exact text of
+#: an exception is kept in the API payload and the logs, but the Prometheus
+#: label is one of these, so a failure whose message contains a changing
+#: number cannot create a new time series on every poll.
+FALLBACK_REASON_LABELS = (
+    "intelligence_evaluation_failed",
+    "no_forecast",
+    "no_risk_assessment",
+    "intelligence_unavailable",
+)
+
+
+def _fallback_label(reason: str) -> str:
+    """The Prometheus label for a fallback reason.
+
+    A known reason keeps its own name; anything else is bucketed as
+    ``intelligence_evaluation_failed`` so the label cardinality stays
+    bounded no matter what the failure text says.
+    """
+    if reason in FALLBACK_REASON_LABELS:
+        return reason
+    for known in FALLBACK_REASON_LABELS:
+        if known in reason:
+            return known
+    return "intelligence_evaluation_failed"
+
 
 class IntelligenceService:
     """Runs the intelligence layer over the cached state and stores the results."""
@@ -118,6 +144,11 @@ class IntelligenceService:
         """The most recent allocation recommendations."""
         return self._last_recommendations
 
+    @property
+    def decision(self) -> Any | None:
+        """The decision service, if the platform is wired for human approval."""
+        return self._decision
+
     def cache_state(self) -> Any | None:
         """The cached snapshot of the world, if there is one."""
         return self._cache.state
@@ -146,6 +177,12 @@ class IntelligenceService:
             )
         except Exception as exc:
             logger.warning("intelligence evaluation failed: %s", exc)
+            # The previous result is stale now: it describes a world that
+            # has moved on, and acting on it would be acting on a forecast
+            # the platform could not refresh. Drop it, so the next proposal
+            # has to use the fallback policy rather than an old forecast.
+            self._last_result = None
+            await self._recommend_with_fallback(state, reason=str(exc))
             return None
 
         self._last_result = result
@@ -157,6 +194,42 @@ class IntelligenceService:
 
         return result
 
+    async def _recommend_with_fallback(self, state: Any, *, reason: str) -> None:
+        """Propose with the rule-based policy, because the model is down.
+
+        This is the resilience path: the intelligence layer failed, but the
+        platform still has to keep the network supplied. The rule is
+        simple enough to trust without a model — refill the lowest
+        days-of-cover first.
+        """
+        if self._decision is None:
+            return
+
+        from .decision.builder import build_world
+
+        try:
+            world = build_world(
+                tick=state.instance.tick,
+                sim_time=state.instance.sim_time,
+                tick_minutes=state.instance.tick_minutes,
+                depots=list(state.depots),
+                stations=list(state.stations),
+                routes=list(state.routes),
+                allocations=list(state.allocations),
+                supply_arrivals=list(state.supply_arrivals),
+            )
+            recommendations = self._decision.fallback.propose(
+                world=world, profiles=self._station_profiles(state)
+            )
+        except Exception as exc:
+            logger.warning("could not propose with the fallback policy: %s", exc)
+            return
+
+        await self._decision.propose(recommendations, fallback=True, reason=reason)
+        self._last_recommendations = recommendations
+        self._update_decision_metrics()
+        await self._persist_recommendations(recommendations)
+
     async def _recommend(self, result: IntelligenceResult) -> None:
         """Propose allocations for the stations that need them.
 
@@ -164,6 +237,10 @@ class IntelligenceService:
         nothing is sent to the simulator until a human approves it. The
         old dispatcher, which shipped on its own, is only used when the
         decision service is not wired in.
+
+        When the intelligence layer cannot produce usable forecasts the
+        **fallback policy** takes over: refill the lowest days-of-cover
+        first, with no model behind it.
         """
         if self._decision is None:
             await self._dispatch(result)
@@ -186,25 +263,126 @@ class IntelligenceService:
             supply_arrivals=list(state.supply_arrivals),
         )
 
-        try:
-            recommendations = self._decision.optimizer.propose(
-                world=world,
-                risks=result.risks,
-                fallback=self._decision.fallback_reason is not None,
-            )
-        except Exception as exc:
-            logger.warning("could not propose allocations: %s", exc)
-            return
+        usable, reason = self._forecasts_are_usable(result)
 
-        await self._decision.propose(
-            recommendations, fallback=self._decision.fallback_reason is not None
-        )
+        if usable:
+            try:
+                recommendations = self._decision.optimizer.propose(world=world, risks=result.risks)
+            except Exception as exc:
+                logger.warning("could not propose allocations: %s", exc)
+                return
+        else:
+            logger.warning(
+                "intelligence layer is degraded; using the fallback policy",
+                extra={"reason": reason},
+            )
+            try:
+                recommendations = self._decision.fallback.propose(
+                    world=world, profiles=self._station_profiles(state)
+                )
+            except Exception as exc:
+                logger.warning("could not propose with the fallback policy: %s", exc)
+                return
+
+        await self._decision.propose(recommendations, fallback=not usable, reason=reason)
         self._last_recommendations = recommendations
         self._update_decision_metrics()
 
         # The decision history is the audit trail, so it is written even
         # when nobody approves anything.
         await self._persist_recommendations(recommendations)
+
+    async def propose_now(self) -> list[Any]:
+        """Propose allocations right now, from the cached state.
+
+        This is the shared path: the background sync and the operator's
+        "propose" button both go through it, so both pick the same policy.
+        When the intelligence layer has nothing usable, the rule-based
+        fallback takes over — an operator who asks for recommendations
+        while the model is down still gets valid, explained ones.
+        """
+        if self._decision is None:
+            return []
+
+        state = self._cache.state
+        if state is None:
+            return []
+
+        from .decision.builder import build_world
+
+        world = build_world(
+            tick=state.instance.tick,
+            sim_time=state.instance.sim_time,
+            tick_minutes=state.instance.tick_minutes,
+            depots=list(state.depots),
+            stations=list(state.stations),
+            routes=list(state.routes),
+            allocations=list(state.allocations),
+            supply_arrivals=list(state.supply_arrivals),
+        )
+
+        result = self._last_result
+        usable, reason = (
+            self._forecasts_are_usable(result)
+            if result
+            else (
+                False,
+                "the intelligence layer has not evaluated the network yet",
+            )
+        )
+
+        if usable:
+            try:
+                recommendations = self._decision.optimizer.propose(world=world, risks=result.risks)
+            except Exception as exc:
+                logger.warning("could not propose allocations: %s", exc)
+                return []
+        else:
+            logger.warning(
+                "intelligence layer is degraded; using the fallback policy",
+                extra={"reason": reason},
+            )
+            try:
+                recommendations = self._decision.fallback.propose(
+                    world=world, profiles=self._station_profiles(state)
+                )
+            except Exception as exc:
+                logger.warning("could not propose with the fallback policy: %s", exc)
+                return []
+
+        await self._decision.propose(recommendations, fallback=not usable, reason=reason)
+        self._last_recommendations = recommendations
+        self._update_decision_metrics()
+        await self._persist_recommendations(recommendations)
+        return recommendations
+
+    def _forecasts_are_usable(self, result: IntelligenceResult) -> tuple[bool, str]:
+        """Whether the intelligence layer produced forecasts worth acting on.
+        The layer falls back to the deterministic profile predictor when
+        the learned model is not available — that is a *degraded* mode,
+        but it is still a forecast, and it is still worth acting on. The
+        decision layer's own fallback is for when there is **no** forecast
+        at all: the evaluation produced nothing.
+        """
+        if not result.forecasts:
+            return False, "the intelligence layer produced no forecast"
+        if not result.risks:
+            return False, "the intelligence layer produced no risk assessment"
+        return True, ""
+
+    def _station_profiles(self, state: Any) -> dict[str, Any]:
+        """The demand context of each station, for the fallback policy."""
+        from .decision.fallback import StationProfile
+
+        region_factors = {region.id: region.demand_factor for region in state.regions}
+        return {
+            station.id: StationProfile(
+                demand_profile=station.demand_profile,
+                region_demand_factor=region_factors.get(station.region_id, 1.0),
+                demand_multiplier=station.demand_multiplier,
+            )
+            for station in state.stations
+        }
 
     async def _persist_recommendations(self, recommendations: list[Any]) -> None:
         """Write the recommendations to the decision history."""
@@ -250,10 +428,12 @@ class IntelligenceService:
         DECISION_APPROVAL_RATE.set(round(approved / proposed, 4) if proposed else 0.0)
         DECISIONS_PER_MINUTE.set(self._decision.decisions_per_minute)
 
-        fallback_reason = self._decision.fallback_reason
+        fallback_reason = self._decision.consume_fallback_activation()
         if fallback_reason:
-            DECISION_FALLBACK_ACTIVATIONS.labels(reason=fallback_reason).inc()
-            self._decision.set_fallback_reason(None)
+            # The label is the *kind* of failure, not its exact text, so an
+            # exception message with a number in it cannot create a new
+            # Prometheus time series on every poll.
+            DECISION_FALLBACK_ACTIVATIONS.labels(reason=_fallback_label(fallback_reason)).inc()
 
     async def _reconcile(self) -> None:
         """Close the loop on the shipments the simulator has since resolved.

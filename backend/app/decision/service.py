@@ -41,6 +41,7 @@ from ..simulator_errors import (
     SimulatorAPIError,
     SimulatorConnectionError,
 )
+from .fallback import FallbackPolicy
 from .models import Recommendation, RecommendationStatus
 from .optimizer import AllocationOptimizer
 from .validator import AllocationValidator
@@ -85,12 +86,14 @@ class DecisionService:
         client: SimulatorClient,
         *,
         optimizer: AllocationOptimizer | None = None,
+        fallback: FallbackPolicy | None = None,
         validator: AllocationValidator | None = None,
         repository: Any | None = None,
         database: Any | None = None,
     ) -> None:
         self._client = client
         self._optimizer = optimizer or AllocationOptimizer()
+        self._fallback = fallback or FallbackPolicy()
         self._validator = validator or AllocationValidator()
         self._repository = repository
         self._database = database
@@ -111,8 +114,14 @@ class DecisionService:
         }
         #: The 409 codes the simulator returned, by code.
         self._conflicts_by_code: dict[str, int] = {}
-        #: Why the fallback policy engaged, if it did.
+        #: Why the fallback policy is in use **right now**, if it is. This is
+        #: sticky: it survives until the normal policy comes back, so the
+        #: operator can see that the platform is degraded rather than
+        #: guessing from a missing recommendation.
         self._fallback_reason: str | None = None
+        #: Whether the current fallback engagement has been counted. A
+        #: persistent outage is one activation, not one per poll cycle.
+        self._fallback_counted = False
         #: The timestamps of the recent proposals, for the per-minute rate.
         self._proposal_times: deque[float] = deque(maxlen=600)
 
@@ -122,6 +131,11 @@ class DecisionService:
     def optimizer(self) -> AllocationOptimizer:
         """The allocation optimizer."""
         return self._optimizer
+
+    @property
+    def fallback(self) -> FallbackPolicy:
+        """The rule-based fallback policy."""
+        return self._fallback
 
     @property
     def auto_mode(self) -> bool:
@@ -136,17 +150,49 @@ class DecisionService:
 
     @property
     def fallback_reason(self) -> str | None:
-        """Why the fallback policy is in use, if it is."""
+        """Why the fallback policy is in use right now, if it is."""
         return self._fallback_reason
 
     def set_fallback_reason(self, reason: str | None) -> None:
-        """Record why the fallback policy is in use."""
+        """Record why the fallback policy is in use.
+
+        The activation counter is keyed on the *engagement*, not on the
+        reason text: an outage is one activation however many different
+        words the failure produces, and however many poll cycles it spans.
+        Setting ``None`` re-arms it, so the next outage counts again.
+        """
         self._fallback_reason = reason
+        if reason is None:
+            self._fallback_counted = False
+
+    def consume_fallback_activation(self) -> str | None:
+        """The fallback reason, if this engagement has not been counted yet.
+
+        The caller turns this into the ``decision_fallback_activations``
+        metric. Returning it only once per engagement is what makes the
+        metric count *activations* rather than poll cycles.
+        """
+        if self._fallback_reason is None or self._fallback_counted:
+            return None
+        self._fallback_counted = True
+        return self._fallback_reason
 
     @property
     def counters(self) -> dict[str, int]:
         """The decision counters."""
         return dict(self._counters)
+
+    @property
+    def decisions_per_minute(self) -> float:
+        """How many recommendations were proposed in the last minute.
+
+        This is a rolling count over the last 60 seconds, not a lifetime
+        average, so it shows the platform's current decision rate rather
+        than its historical one.
+        """
+        now = time.monotonic()
+        recent = [stamp for stamp in self._proposal_times if now - stamp <= 60.0]
+        return float(len(recent))
 
     @property
     def conflicts_by_code(self) -> dict[str, int]:
@@ -176,16 +222,28 @@ class DecisionService:
         recommendations: list[Recommendation],
         *,
         fallback: bool = False,
+        reason: str | None = None,
     ) -> list[Recommendation]:
-        """Record the proposals from the optimizer."""
-        self._fallback_reason = "the intelligence layer is unavailable" if fallback else None
+        """Record the proposals from the optimizer.
+
+        ``fallback=True`` marks the proposals as having come from the
+        rule-based policy, and ``reason`` says why. The reason is kept
+        until the normal policy comes back, so the operator can see *why*
+        the platform fell back rather than only that it did.
+        """
+        if fallback:
+            self.set_fallback_reason(reason or "the intelligence layer is unavailable")
+        else:
+            self.set_fallback_reason(None)
 
         for recommendation in recommendations:
             self._recommendations[recommendation.id] = recommendation
             self._counters["proposed"] += 1
             self._proposal_times.append(time.monotonic())
             if fallback:
-                self._counters["fallbacks"] = self._counters.get("fallbacks", 0) + 1
+                self._counters["fallback_recommendations"] = (
+                    self._counters.get("fallback_recommendations", 0) + 1
+                )
 
         if self._auto_mode:
             await self._auto_approve(recommendations)

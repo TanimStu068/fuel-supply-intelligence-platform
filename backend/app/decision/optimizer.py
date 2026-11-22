@@ -72,6 +72,12 @@ class OptimizerConfig:
     min_shipment_liters: float = 500.0
     #: How many ranked alternatives to keep.
     max_alternatives: int = 3
+    #: How many shipments a deficit may be split across. A deficit larger
+    #: than the route's ``max_shipment`` is split into several allocations,
+    #: because the simulator refuses any single allocation above that
+    #: limit. The cap keeps a pathological deficit from becoming a flood
+    #: of proposals.
+    max_split_legs: int = 4
     #: Only stations at this level or worse are considered.
     actionable_levels: frozenset[RiskLevel] = frozenset({RiskLevel.WATCH, RiskLevel.CRITICAL})
 
@@ -98,19 +104,17 @@ class AllocationOptimizer:
         *,
         world: WorldSnapshot,
         risks: list[RiskAssessment],
-        fallback: bool = False,
     ) -> list[Recommendation]:
         """Propose allocations for the stations that need them.
 
-        ``fallback=True`` switches to the rule-based policy, used when the
-        intelligence layer cannot produce forecasts.
+        This is the **model-driven** policy: it needs the risk assessments
+        the intelligence layer produced, and it orders them by urgency. The
+        rule-based policy for when the intelligence layer is down lives in
+        :mod:`app.decision.fallback`, so there is exactly one
+        implementation of each.
         """
         actionable = [risk for risk in risks if risk.risk_level in self._config.actionable_levels]
-
-        if fallback:
-            ordered = self._order_by_fallback_policy(actionable)
-        else:
-            ordered = self._order_by_urgency(actionable)
+        ordered = self._order_by_urgency(actionable)
 
         recommendations: list[Recommendation] = []
         # The depot's per-tick dispatch allowance is a shared, consumable
@@ -119,10 +123,7 @@ class AllocationOptimizer:
         spent: dict[str, float] = {}
 
         for risk in ordered:
-            recommendation = self._propose_for(
-                world=world, risk=risk, spent=spent, fallback=fallback
-            )
-            if recommendation is not None:
+            for recommendation in self._propose_for(world=world, risk=risk, spent=spent):
                 recommendations.append(recommendation)
                 spent[recommendation.source_depot_id] = (
                     spent.get(recommendation.source_depot_id, 0.0) + recommendation.quantity
@@ -152,10 +153,8 @@ class AllocationOptimizer:
     def _order_by_fallback_policy(self, risks: list[RiskAssessment]) -> list[RiskAssessment]:
         """The fallback ordering: refill the lowest days-of-cover first.
 
-        This is the rule the brief asks for when the intelligence layer is
-        down. Days of cover is estimated from the forecast's own daily
-        demand, because without a model there is no better estimate
-        available.
+        Kept for the rule-based policy's benefit: it is the one place that
+        knows how to rank risks when there is no forecast behind them.
         """
         return sorted(
             risks,
@@ -184,16 +183,22 @@ class AllocationOptimizer:
         world: WorldSnapshot,
         risk: RiskAssessment,
         spent: dict[str, float],
-        fallback: bool,
-    ) -> Recommendation | None:
-        """Build the recommendation for one station and fuel."""
+    ) -> list[Recommendation]:
+        """Build the recommendations for one station and fuel.
+
+        A deficit larger than the route's ``max_shipment`` is **split**
+        across several shipments, because the simulator refuses any single
+        allocation above that limit. The legs share the depot's dispatch
+        allowance, which is a per-tick total, so the split has to respect
+        it as a whole.
+        """
         station = world.stations.get(risk.station_id)
         if station is None:
-            return None
+            return []
 
         needed = self._needed_liters(risk, world)
         if needed < self._config.min_shipment_liters:
-            return None
+            return []
 
         candidates: list[tuple[float, Recommendation]] = []
         rejected: list[Alternative] = []
@@ -251,12 +256,11 @@ class AllocationOptimizer:
                 quantity=quantity,
                 projection=projection,
                 report=report,
-                fallback=fallback,
             )
             candidates.append((self._score(projection, route), recommendation))
 
         if not candidates:
-            return None
+            return []
 
         candidates.sort(key=lambda item: item[0], reverse=True)
         _, best = candidates[0]
@@ -288,7 +292,94 @@ class AllocationOptimizer:
         alternatives.sort(key=lambda alternative: alternative.score, reverse=True)
         best.alternatives = alternatives[: self._config.max_alternatives]
 
-        return best
+        return self._split(world=world, risk=risk, best=best, needed=needed)
+
+    def _split(
+        self,
+        *,
+        world: WorldSnapshot,
+        risk: RiskAssessment,
+        best: Recommendation,
+        needed: float,
+    ) -> list[Recommendation]:
+        """Split a proposal that is larger than the route can carry.
+
+        The simulator's ``max_shipment`` is a per-allocation limit, so a
+        deficit above it has to go out as several shipments. Each leg is a
+        separate recommendation with its own idempotency key, because the
+        operator approves and submits them one at a time.
+
+        The legs are bounded by the same caps the single shipment was: the
+        depot's dispatch allowance for the tick, the depot's stock, and
+        the station's free tank space. The tank space matters most — the
+        simulator caps what a tank actually *receives* on arrival, so
+        splitting past the tank's room would promise fuel that cannot be
+        delivered.
+        """
+        route = next((r for r in world.routes if r.id == best.route_id), None)
+        if route is None:
+            return [best]
+
+        # The true deficit, before any cap was applied.
+        deficit = needed
+        if deficit <= route.max_shipment:
+            return [best]
+
+        station = world.stations.get(risk.station_id)
+        depot = world.depots.get(best.source_depot_id)
+        if station is None or depot is None:
+            return [best]
+
+        tank_room = max(
+            0.0,
+            station.capacity.get(risk.fuel_type, 0.0) - station.inventory.get(risk.fuel_type, 0.0),
+        )
+        dispatch_left = world.remaining_dispatch(best.source_depot_id, world.tick)
+        stock = depot.inventory.get(risk.fuel_type, 0.0)
+        ceiling = min(tank_room, dispatch_left, stock)
+        if ceiling <= 0:
+            return [best]
+
+        legs: list[Recommendation] = []
+        remaining = min(deficit, ceiling)
+        index = 0
+        while remaining > 0 and index < self._config.max_split_legs:
+            leg_quantity = round(min(remaining, route.max_shipment), 3)
+            if leg_quantity <= 0:
+                break
+
+            report = self._validator.validate(
+                world=world,
+                source_depot_id=best.source_depot_id,
+                destination_station_id=risk.station_id,
+                route_id=best.route_id,
+                fuel_type=risk.fuel_type,
+                quantity=leg_quantity,
+            )
+            if not report.is_valid:
+                break
+
+            projection = self._project(world=world, risk=risk, route=route, quantity=leg_quantity)
+            leg = self._build_recommendation(
+                world=world,
+                risk=risk,
+                route=route,
+                quantity=leg_quantity,
+                projection=projection,
+                report=report,
+                leg=index,
+            )
+            legs.append(leg)
+            remaining = round(remaining - leg_quantity, 3)
+            index += 1
+
+        if not legs:
+            return [best]
+
+        # The alternatives belong to the first leg: they are the routes
+        # that were considered *instead of* this one.
+        legs[0].alternatives = best.alternatives
+        return legs
 
     def _build_recommendation(
         self,
@@ -299,7 +390,7 @@ class AllocationOptimizer:
         quantity: float,
         projection: RiskProjection,
         report: ConstraintReport,
-        fallback: bool,
+        leg: int = 0,
     ) -> Recommendation:
         """Assemble the recommendation, with everything that explains it."""
         route_id = route.id
@@ -310,9 +401,14 @@ class AllocationOptimizer:
         # submission is a replay rather than a second shipment. The
         # simulator's key is permanently occupied once used, so the
         # quantity has to be part of it — a changed body needs a new key.
-        idempotency_key = f"rec-{risk.station_id}-{risk.fuel_type}-{world.tick}-{int(quantity)}"
+        # The leg number distinguishes the parts of a split shipment, which
+        # would otherwise collide when two legs carry the same quantity.
+        suffix = f"-{leg}" if leg else ""
+        idempotency_key = (
+            f"rec-{risk.station_id}-{risk.fuel_type}-{world.tick}-{int(quantity)}{suffix}"
+        )
 
-        confidence = self._confidence(risk, projection, fallback)
+        confidence = self._confidence(risk, projection)
 
         return Recommendation(
             id=idempotency_key,
@@ -330,14 +426,11 @@ class AllocationOptimizer:
             constraints=report.to_payload(),
             confidence=confidence,
             needs_human_review=(
-                fallback
-                or risk.needs_human_review
-                or confidence < 0.6
-                or risk.risk_level is RiskLevel.CRITICAL
+                risk.needs_human_review or confidence < 0.6 or risk.risk_level is RiskLevel.CRITICAL
             ),
-            used_fallback_policy=fallback,
+            used_fallback_policy=False,
             idempotency_key=idempotency_key,
-            rationale=self._rationale(risk, projection, route, quantity, fallback),
+            rationale=self._rationale(risk, projection, route, quantity),
             created_at=datetime.now(UTC),
             sim_tick=world.tick,
         )
@@ -562,13 +655,8 @@ class AllocationOptimizer:
         )
         return round(cover - route.transit_ticks * 0.5, 4)
 
-    def _confidence(
-        self, risk: RiskAssessment, projection: RiskProjection, fallback: bool
-    ) -> float:
+    def _confidence(self, risk: RiskAssessment, projection: RiskProjection) -> float:
         """How much the engine trusts this recommendation."""
-        if fallback:
-            # The fallback policy has no model behind it.
-            return 0.4
         confidence = risk.forecast.confidence
         if projection.hours_to_stockout_after is None and risk.hours_to_stockout is not None:
             # The shipment removes the stockout entirely.
@@ -581,17 +669,8 @@ class AllocationOptimizer:
         projection: RiskProjection,
         route: object,
         quantity: float,
-        fallback: bool,
     ) -> str:
         """One line explaining the recommendation."""
-        if fallback:
-            return (
-                f"Refill {risk.station_id} ({risk.fuel_type.lower()}): it has the "
-                f"lowest days of cover and the forecast model is unavailable. "
-                f"Ship {quantity:,.0f} L from {route.source_depot_id} via "
-                f"{route.id}, arriving in {route.transit_ticks} ticks."
-            )
-
         if risk.hours_to_stockout is not None:
             situation = (
                 f"{risk.risk_level.value} risk at {risk.station_id}: "
