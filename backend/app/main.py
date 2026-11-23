@@ -135,7 +135,9 @@ _allowed_origins = [
     origin.strip()
     for origin in os.getenv(
         "CORS_ALLOWED_ORIGINS",
-        "http://localhost:5173,http://localhost:3000,http://127.0.0.1:5173",
+        "http://localhost:5173,http://localhost:3000,http://127.0.0.1:5173,"
+        # 4173 is the port the Playwright preview server uses.
+        "http://localhost:4173,http://127.0.0.1:4173",
     ).split(",")
     if origin.strip()
 ]
@@ -876,4 +878,295 @@ async def root() -> dict[str, str]:
         "state": "/api/state",
         "stations": "/api/stations",
         "history": "/api/history/{station_id}",
+    }
+
+
+# ---------------------------------------------------------------------------
+# Simulation control and crisis injection.
+#
+# These drive the *simulator*, not the platform. They exist so an operator
+# can run the crisis drills from the dashboard. Every response is labelled
+# `simulation_only` so the dashboard can say so on screen.
+# ---------------------------------------------------------------------------
+
+
+class CrisisRequest(BaseModel):
+    """The body of a crisis-injection request."""
+
+    #: Which crisis to inject. One of the simulator's six event types.
+    type: str = Field(min_length=1, max_length=40)
+    #: How long the crisis lasts, in ticks.
+    duration_ticks: int = Field(default=8, ge=1, le=200)
+    #: The crisis's parameters, passed through to the simulator.
+    parameters: dict[str, Any] = Field(default_factory=dict)
+
+
+@app.get("/api/simulation", tags=["simulation"])
+async def get_simulation_control(
+    client: SimulatorClient = Depends(get_simulator),
+    cache: StateCache = Depends(get_cache),
+) -> dict[str, Any]:
+    """Report what the simulation can currently be told to do.
+
+    The dashboard's controls need to know whether the simulation is
+    running before it offers a "Run" button, and what tick it is at.
+    """
+    state = cache.state
+    instance = state.instance if state else None
+    return {
+        "simulation_only": True,
+        "status": instance.status if instance else "UNKNOWN",
+        "tick": instance.tick if instance else None,
+        "sim_time": instance.sim_time.isoformat() if instance and instance.sim_time else None,
+        "tick_minutes": instance.tick_minutes if instance else None,
+        "scenario_id": instance.scenario_id if instance else None,
+        "actions": ["run", "pause", "toggle", "step", "reset"],
+    }
+
+
+@app.post("/api/simulation/crisis", tags=["simulation"])
+async def inject_crisis(
+    request: CrisisRequest,
+    client: SimulatorClient = Depends(get_simulator),
+) -> dict[str, Any]:
+    """Inject a crisis event into the simulation.
+
+    The six types are the simulator's own (guide §7.8): demand spike, route
+    disruption, station outage, depot constraint, shipment delay and supply
+    shortfall.
+    """
+    from .simulator_models import EventCreate
+
+    try:
+        body = EventCreate.model_validate(
+            {
+                "type": request.type,
+                "start_tick": await _current_tick(client),
+                "duration_ticks": request.duration_ticks,
+                "parameters": request.parameters,
+            }
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"invalid crisis: {exc}",
+        ) from exc
+
+    try:
+        event = await client.admin_inject_event(body)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"the simulator refused the crisis: {exc}",
+        ) from exc
+
+    return {
+        "simulation_only": True,
+        "event": event.model_dump(mode="json") if hasattr(event, "model_dump") else dict(event),
+    }
+
+
+@app.post("/api/simulation/{action}", tags=["simulation"])
+async def control_simulation(
+    action: str,
+    client: SimulatorClient = Depends(get_simulator),
+) -> dict[str, Any]:
+    """Run, pause, toggle, step or reset the simulation.
+
+    This is the *simulator's* control surface, reached through the backend
+    so the dashboard never talks to the simulator directly. It changes the
+    simulated world and nothing else — the platform's own state is
+    re-synced from the simulator on the next cycle.
+    """
+    actions = {
+        "run": client.admin_run,
+        "pause": client.admin_pause,
+        "toggle": client.admin_toggle,
+        "step": client.admin_step,
+        "reset": client.admin_reset,
+    }
+    handler = actions.get(action)
+    if handler is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"unknown simulation action: {action}",
+        )
+
+    try:
+        result = await handler()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"the simulator refused to {action}: {exc}",
+        ) from exc
+
+    payload = result.model_dump(mode="json") if hasattr(result, "model_dump") else dict(result)
+    return {"simulation_only": True, "action": action, "result": payload}
+
+
+async def _current_tick(client: SimulatorClient) -> int:
+    """The simulator's current tick, or 0 when it cannot be read."""
+    try:
+        instance = await client.get_instance()
+    except Exception:
+        return 0
+    return instance.tick
+
+
+def _cached_simulator_health(
+    cache: StateCache,
+    sync_status: dict[str, Any],
+) -> dict[str, Any]:
+    """The simulator's state, read from the sync cache rather than probed.
+
+    The cached instance still says which tick the world is at and whether
+    it is running, which is what the panel needs; the sync status says
+    whether the last refresh actually reached the simulator.
+    """
+    state = cache.state
+    instance = state.instance if state else None
+
+    if sync_status.get("degraded"):
+        return {
+            "status": "unreachable",
+            "error": cache.degraded_reason or "the simulator is not answering",
+            "simulation": {
+                "status": str(instance.status) if instance else "UNKNOWN",
+                "tick": instance.tick if instance else 0,
+            },
+        }
+
+    return {
+        "status": "ok",
+        "database": "ok",
+        "simulation": {
+            "status": str(instance.status) if instance else "UNKNOWN",
+            "tick": instance.tick if instance else 0,
+        },
+    }
+
+
+@app.get("/api/service-health", tags=["ops"])
+async def service_health(
+    request: Request,
+    client: SimulatorClient = Depends(get_simulator),
+    db: Database = Depends(get_database),
+    cache: StateCache = Depends(get_cache),
+) -> dict[str, Any]:
+    """The service health panel: every dependency, in one payload.
+
+    The dashboard shows this as its "service health" panel: the backend,
+    the database, the simulator, the prediction service, the decision
+    engine, plus the request latency and error rate the Prometheus
+    registry holds.
+
+    The simulator's state is read from the **sync cache**, not from a
+    fresh probe. The dashboard polls this endpoint every few seconds; a
+    live probe would block for the whole simulator timeout each time
+    the simulator is slow, and the panel would be the slowest thing on
+    the page. The cache already knows whether the last sync succeeded.
+    """
+    sync = get_sync(request)
+    sync_status = sync.status()
+    simulator_status = _cached_simulator_health(cache, sync_status)
+    database_status = await _database_health(db)
+
+    decision: DecisionService | None = None
+    try:
+        decision = request.app.state.decision
+    except AttributeError:
+        decision = None
+
+    intelligence = (
+        request.app.state.intelligence if hasattr(request.app.state, "intelligence") else None
+    )
+    last_result = intelligence.last_result if intelligence is not None else None
+    active_model = last_result.active_model.value if last_result is not None else "unknown"
+
+    counters = decision.counters if decision is not None else {}
+    proposed = counters.get("proposed", 0)
+    approved = counters.get("approved", 0)
+
+    return {
+        "components": {
+            "backend": {"status": "ok"},
+            "database": database_status,
+            "simulator": simulator_status,
+            "prediction_service": {
+                "status": "ok" if last_result is not None else "degraded",
+                "active_model": active_model,
+                "evaluated_at": last_result.evaluated_at.isoformat()
+                if last_result is not None and last_result.evaluated_at
+                else None,
+                "forecast_count": len(last_result.forecasts) if last_result is not None else 0,
+            },
+            "decision_engine": {
+                "status": "ok" if decision is not None else "degraded",
+                "auto_mode": decision.auto_mode if decision is not None else False,
+                "fallback_active": decision.fallback_reason is not None
+                if decision is not None
+                else False,
+                "fallback_reason": decision.fallback_reason if decision is not None else None,
+                "counters": counters,
+                "approval_rate": round(approved / proposed, 4) if proposed else 0.0,
+                "decisions_per_minute": decision.decisions_per_minute
+                if decision is not None
+                else 0.0,
+            },
+        },
+        "http": _http_metrics(),
+    }
+
+
+def _http_metrics() -> dict[str, Any]:
+    """The request latency and error rate, read from the Prometheus registry.
+
+    The dashboard shows p95 latency and the error rate; both come from the
+    same registry Prometheus scrapes, so the panel and the Grafana
+    dashboard cannot disagree.
+    """
+    from .metrics import HTTP_REQUEST_DURATION, HTTP_REQUESTS
+
+    # The histogram's buckets are *cumulative counts* per upper bound, so
+    # the 95th percentile is the largest boundary whose cumulative count
+    # reaches 95% of the observations. Summing the buckets instead would
+    # give the observation count, not a latency.
+    buckets: list[tuple[float, float]] = []
+    observations = 0
+    for metric in HTTP_REQUEST_DURATION.collect():
+        for sample in metric.samples:
+            if sample.name.endswith("_count"):
+                observations += sample.value
+            elif sample.name.endswith("_bucket"):
+                try:
+                    boundary = float(sample.labels.get("le", "+Inf"))
+                except ValueError:
+                    continue
+                buckets.append((boundary, sample.value))
+
+    p95 = 0.0
+    if buckets and observations > 0:
+        buckets.sort()
+        target = observations * 0.95
+        cumulative = 0.0
+        for boundary, count in buckets:
+            cumulative += count
+            if cumulative >= target:
+                p95 = boundary
+                break
+
+    errors = 0
+    total = 0
+    for metric in HTTP_REQUESTS.collect():
+        for sample in metric.samples:
+            if sample.name.endswith("_total"):
+                total += sample.value
+                if sample.labels.get("status", "").startswith("5"):
+                    errors += sample.value
+
+    return {
+        "p95_latency_seconds": round(p95, 6),
+        "request_count": int(total),
+        "error_count": int(errors),
+        "error_rate": round(errors / total, 6) if total else 0.0,
     }

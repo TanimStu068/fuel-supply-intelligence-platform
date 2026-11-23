@@ -1,222 +1,318 @@
-import { useEffect, useState } from 'react'
-import { fetchHealth, fetchState } from './api'
-import type { HealthReport, StateSnapshot } from './types'
+/**
+ * The dashboard.
+ *
+ * One polling loop feeds the whole app: the state, the risk assessments,
+ * the alerts, the recommendations, the decision history and the service
+ * health are all read from the same backend on the same cadence, so the
+ * screens cannot disagree with each other.
+ *
+ * The approve / reject / what-if actions are deliberately *not* part of
+ * the poll: they write, so they run once, report their own error, and
+ * then trigger a refresh.
+ */
 
-function pct(value: number): string {
-  return `${(value * 100).toFixed(2)}%`
-}
+import { useCallback, useMemo, useState } from 'react'
+import {
+  approveRecommendation,
+  controlSimulation,
+  fetchAlerts,
+  fetchDecisionHistory,
+  fetchDecisionSettings,
+  fetchForecasts,
+  fetchHealth,
+  fetchRecommendations,
+  fetchRisks,
+  fetchServiceHealth,
+  fetchSimulation,
+  fetchState,
+  injectCrisis,
+  proposeRecommendations,
+  rejectRecommendation,
+  simulateRecommendation,
+} from './api'
+import { AppShell, type ViewId } from './components/AppShell'
+import { ErrorState, Loading } from './components/ui'
+import { usePolled } from './hooks/usePolled'
+import { HealthView } from './views/HealthView'
+import { HistoryView } from './views/HistoryView'
+import { InventoryView } from './views/InventoryView'
+import { NetworkView } from './views/NetworkView'
+import { OverviewView } from './views/OverviewView'
+import { RecommendationsView } from './views/RecommendationsView'
+import { RiskView } from './views/RiskView'
+import { SimulationView } from './views/SimulationView'
+import { TimelineView } from './views/TimelineView'
+import type { SimulationResult } from './types'
 
-function litres(value: number): string {
-  return `${value.toLocaleString(undefined, { maximumFractionDigits: 0 })} L`
-}
+const POLL_MS = 5000
 
 export default function App() {
-  const [health, setHealth] = useState<HealthReport | null>(null)
-  const [state, setState] = useState<StateSnapshot | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const [view, setView] = useState<ViewId>('overview')
+  const [simulations, setSimulations] = useState<Record<string, SimulationResult | null>>({})
+  const [busyIds, setBusyIds] = useState<Set<string>>(new Set())
+  const [actionErrors, setActionErrors] = useState<Record<string, string | null>>({})
+  const [simulationBusy, setSimulationBusy] = useState(false)
+  const [simulationError, setSimulationError] = useState<string | null>(null)
+  const [lastAction, setLastAction] = useState<string | null>(null)
 
-  useEffect(() => {
-    let cancelled = false
-    const load = async () => {
-      try {
-        const [h, s] = await Promise.all([fetchHealth(), fetchState()])
-        if (cancelled) return
-        setHealth(h)
-        setState(s)
-        setError(null)
-      } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : String(err))
-      }
-    }
-    void load()
-    const timer = window.setInterval(() => void load(), 5000)
-    return () => {
-      cancelled = true
-      window.clearInterval(timer)
-    }
+  const health = usePolled(fetchHealth, POLL_MS * 2)
+  const state = usePolled(fetchState, POLL_MS)
+  const risks = usePolled(fetchRisks, POLL_MS)
+  const forecasts = usePolled(fetchForecasts, POLL_MS * 2)
+  const alerts = usePolled(fetchAlerts, POLL_MS)
+  const recommendations = usePolled(fetchRecommendations, POLL_MS)
+  const history = usePolled(fetchDecisionHistory, POLL_MS)
+  const settings = usePolled(fetchDecisionSettings, POLL_MS)
+  const serviceHealth = usePolled(fetchServiceHealth, POLL_MS * 2)
+  const simulation = usePolled(fetchSimulation, POLL_MS)
+
+  const refreshAll = useCallback(() => {
+    state.refresh()
+    risks.refresh()
+    recommendations.refresh()
+    history.refresh()
+    alerts.refresh()
+  }, [state, risks, recommendations, history, alerts])
+
+  const setBusy = useCallback((id: string, busy: boolean) => {
+    setBusyIds((current) => {
+      const next = new Set(current)
+      if (busy) next.add(id)
+      else next.delete(id)
+      return next
+    })
   }, [])
 
-  if (error && !state) {
+  const handleApprove = useCallback(
+    async (id: string) => {
+      setBusy(id, true)
+      setActionErrors((current) => ({ ...current, [id]: null }))
+      try {
+        await approveRecommendation(id, 'operator')
+        refreshAll()
+      } catch (cause) {
+        setActionErrors((current) => ({
+          ...current,
+          [id]: cause instanceof Error ? cause.message : String(cause),
+        }))
+      } finally {
+        setBusy(id, false)
+      }
+    },
+    [setBusy, refreshAll],
+  )
+
+  const handleReject = useCallback(
+    async (id: string) => {
+      setBusy(id, true)
+      setActionErrors((current) => ({ ...current, [id]: null }))
+      try {
+        await rejectRecommendation(id, 'operator', 'rejected from the dashboard')
+        refreshAll()
+      } catch (cause) {
+        setActionErrors((current) => ({
+          ...current,
+          [id]: cause instanceof Error ? cause.message : String(cause),
+        }))
+      } finally {
+        setBusy(id, false)
+      }
+    },
+    [setBusy, refreshAll],
+  )
+
+  const handleSimulate = useCallback(
+    async (id: string) => {
+      setBusy(id, true)
+      setActionErrors((current) => ({ ...current, [id]: null }))
+      try {
+        const result = await simulateRecommendation(id)
+        setSimulations((current) => ({ ...current, [id]: result }))
+      } catch (cause) {
+        setActionErrors((current) => ({
+          ...current,
+          [id]: cause instanceof Error ? cause.message : String(cause),
+        }))
+      } finally {
+        setBusy(id, false)
+      }
+    },
+    [setBusy],
+  )
+
+  const handlePropose = useCallback(async () => {
+    try {
+      await proposeRecommendations()
+      refreshAll()
+    } catch (cause) {
+      setSimulationError(cause instanceof Error ? cause.message : String(cause))
+    }
+  }, [refreshAll])
+
+  const handleSimulationControl = useCallback(
+    async (action: string) => {
+      setSimulationBusy(true)
+      setSimulationError(null)
+      try {
+        await controlSimulation(action)
+        setLastAction(action)
+        simulation.refresh()
+        refreshAll()
+      } catch (cause) {
+        setSimulationError(cause instanceof Error ? cause.message : String(cause))
+      } finally {
+        setSimulationBusy(false)
+      }
+    },
+    [simulation, refreshAll],
+  )
+
+  const handleCrisis = useCallback(
+    async (type: string, durationTicks: number, parameters: Record<string, unknown>) => {
+      setSimulationBusy(true)
+      setSimulationError(null)
+      try {
+        await injectCrisis(type, durationTicks, parameters)
+        setLastAction(`crisis: ${type}`)
+        simulation.refresh()
+        refreshAll()
+      } catch (cause) {
+        setSimulationError(cause instanceof Error ? cause.message : String(cause))
+      } finally {
+        setSimulationBusy(false)
+      }
+    },
+    [simulation, refreshAll],
+  )
+
+  const riskList = risks.data?.risks ?? []
+  const alertList = alerts.data?.alerts ?? []
+  const forecastList = forecasts.data?.forecasts ?? []
+  const recommendationList = recommendations.data?.recommendations ?? []
+
+  const body = useMemo(() => {
+    switch (view) {
+      case 'overview':
+        return (
+          <OverviewView
+            state={state.data}
+            risks={riskList}
+            alerts={alertList}
+            recommendations={recommendationList}
+            serviceHealth={serviceHealth.data}
+          />
+        )
+      case 'network':
+        return (
+          <NetworkView
+            depots={state.data?.depots ?? []}
+            stations={state.data?.stations ?? []}
+            routes={state.data?.routes ?? []}
+            regions={state.data?.regions ?? []}
+          />
+        )
+      case 'inventory':
+        return (
+          <InventoryView
+            stations={state.data?.stations ?? []}
+            depots={state.data?.depots ?? []}
+            risks={riskList}
+          />
+        )
+      case 'risk':
+        return <RiskView risks={riskList} alerts={alertList} forecasts={forecastList} />
+      case 'recommendations':
+        return (
+          <RecommendationsView
+            recommendations={recommendationList}
+            autoMode={settings.data?.auto_mode ?? false}
+            fallbackReason={recommendations.data?.fallback_reason ?? null}
+            onApprove={handleApprove}
+            onReject={handleReject}
+            onSimulate={handleSimulate}
+            onPropose={handlePropose}
+            simulations={simulations}
+            busyIds={busyIds}
+            actionErrors={actionErrors}
+          />
+        )
+      case 'timeline':
+        return (
+          <TimelineView
+            arrivals={state.data?.supply_arrivals ?? []}
+            events={state.data?.events ?? []}
+          />
+        )
+      case 'history':
+        return <HistoryView decisions={history.data?.decisions ?? []} />
+      case 'health':
+        return <HealthView health={serviceHealth.data} />
+      case 'simulation':
+        return (
+          <SimulationView
+            control={simulation.data}
+            onControl={handleSimulationControl}
+            onCrisis={handleCrisis}
+            busy={simulationBusy}
+            error={simulationError}
+            lastAction={lastAction}
+          />
+        )
+      default:
+        return null
+    }
+  }, [
+    view,
+    state.data,
+    riskList,
+    alertList,
+    forecastList,
+    recommendationList,
+    settings.data?.auto_mode,
+    recommendations.data?.fallback_reason,
+    serviceHealth.data,
+    history.data?.decisions,
+    simulation.data,
+    simulations,
+    busyIds,
+    actionErrors,
+    handleApprove,
+    handleReject,
+    handleSimulate,
+    handlePropose,
+    handleSimulationControl,
+    handleCrisis,
+    simulationBusy,
+    simulationError,
+    lastAction,
+  ])
+
+  if (state.loading && !state.data) {
     return (
-      <main className="app">
+      <div className="app">
+        <Loading label="Connecting to the platform…" />
+      </div>
+    )
+  }
+
+  if (!state.data && state.error) {
+    return (
+      <div className="app">
         <h1>Fuel Supply Intelligence &amp; Resilience Platform</h1>
-        <p className="error">Backend unreachable: {error}</p>
-      </main>
+        <ErrorState message={state.error} onRetry={state.refresh} />
+      </div>
     )
   }
 
   return (
-    <main className="app">
-      <header>
-        <h1>Fuel Supply Intelligence &amp; Resilience Platform</h1>
-        <p className="subtitle">
-          BUP CSE Fest 2026 &middot; Day 1 skeleton &middot; operator view
-        </p>
-      </header>
-
-      <section className="cards">
-        <article className="card">
-          <h2>System status</h2>
-          <dl>
-            <dt>Backend API</dt>
-            <dd>{health?.components.backend.status ?? '—'}</dd>
-            <dt>Database</dt>
-            <dd>{health?.components.database.status ?? '—'}</dd>
-            <dt>Fuel Simulator</dt>
-            <dd>{health?.components.simulator.status ?? '—'}</dd>
-          </dl>
-        </article>
-
-        <article className="card">
-          <h2>Simulation</h2>
-          <dl>
-            <dt>Tick</dt>
-            <dd>{state?.instance.tick ?? '—'}</dd>
-            <dt>Status</dt>
-            <dd>{state?.instance.status ?? '—'}</dd>
-            <dt>Sim time</dt>
-            <dd>{state?.instance.sim_time ?? '—'}</dd>
-            <dt>Scenario</dt>
-            <dd>{state?.instance.scenario_id ?? '—'}</dd>
-            <dt>Stale data</dt>
-            <dd>{state?.stale ? 'YES — simulator served cached state' : 'no'}</dd>
-          </dl>
-        </article>
-
-        <article className="card">
-          <h2>Service level</h2>
-          <dl>
-            <dt>Service level</dt>
-            <dd>{state ? pct(state.metrics.service_level) : '—'}</dd>
-            <dt>Served</dt>
-            <dd>{state ? litres(state.metrics.served_demand_liters) : '—'}</dd>
-            <dt>Unmet</dt>
-            <dd>{state ? litres(state.metrics.unmet_demand_liters) : '—'}</dd>
-            <dt>Allocated</dt>
-            <dd>{state ? litres(state.metrics.allocation_liters) : '—'}</dd>
-            <dt>Failures</dt>
-            <dd>{state?.metrics.allocation_failures ?? '—'}</dd>
-          </dl>
-        </article>
-      </section>
-
-      <section className="cards">
-        <article className="card">
-          <h2>Depots</h2>
-          <table>
-            <thead>
-              <tr>
-                <th>Depot</th>
-                <th>Status</th>
-                <th>Diesel</th>
-                <th>Petrol</th>
-                <th>Octane</th>
-              </tr>
-            </thead>
-            <tbody>
-              {state?.depots.map((depot) => (
-                <tr key={depot.id}>
-                  <td>{depot.name}</td>
-                  <td>{depot.status}</td>
-                  <td>{depot.inventory.DIESEL.toLocaleString()}</td>
-                  <td>{depot.inventory.PETROL.toLocaleString()}</td>
-                  <td>{depot.inventory.OCTANE.toLocaleString()}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </article>
-
-        <article className="card">
-          <h2>Stations</h2>
-          <table>
-            <thead>
-              <tr>
-                <th>Station</th>
-                <th>Status</th>
-                <th>Diesel</th>
-                <th>Petrol</th>
-                <th>Octane</th>
-              </tr>
-            </thead>
-            <tbody>
-              {state?.stations.map((station) => (
-                <tr key={station.id}>
-                  <td>{station.name}</td>
-                  <td>{station.status}</td>
-                  <td>{station.inventory.DIESEL.toLocaleString()}</td>
-                  <td>{station.inventory.PETROL.toLocaleString()}</td>
-                  <td>{station.inventory.OCTANE.toLocaleString()}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </article>
-      </section>
-
-      <section className="cards">
-        <article className="card">
-          <h2>Routes</h2>
-          <table>
-            <thead>
-              <tr>
-                <th>Route</th>
-                <th>Depot</th>
-                <th>Station</th>
-                <th>Transit (ticks)</th>
-                <th>Max shipment</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {state?.routes.map((route) => (
-                <tr key={route.id}>
-                  <td>{route.id}</td>
-                  <td>{route.source_depot_id}</td>
-                  <td>{route.destination_station_id}</td>
-                  <td>{route.transit_ticks}</td>
-                  <td>{route.max_shipment.toLocaleString()}</td>
-                  <td>{route.status}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </article>
-
-        <article className="card">
-          <h2>Allocations</h2>
-          <table>
-            <thead>
-              <tr>
-                <th>Id</th>
-                <th>Route</th>
-                <th>Fuel</th>
-                <th>Qty</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {state?.allocations.length === 0 ? (
-                <tr>
-                  <td colSpan={5}>No allocations yet.</td>
-                </tr>
-              ) : (
-                state?.allocations.map((allocation) => (
-                  <tr key={allocation.id}>
-                    <td>{allocation.id}</td>
-                    <td>{allocation.route_id}</td>
-                    <td>{allocation.fuel_type}</td>
-                    <td>{allocation.quantity.toLocaleString()}</td>
-                    <td>{allocation.status}</td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </article>
-      </section>
-
-      {error && <p className="error">Last refresh failed: {error}</p>}
-    </main>
+    <AppShell
+      view={view}
+      onNavigate={setView}
+      state={state.data}
+      health={health.data}
+      serviceHealth={serviceHealth.data}
+    >
+      {body}
+    </AppShell>
   )
 }

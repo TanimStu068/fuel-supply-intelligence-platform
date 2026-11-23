@@ -259,21 +259,26 @@ reaching the simulator without a human.
 
 **Goal:** a usable operator dashboard in `/frontend`.
 
-- [ ] Overview: tick, time, status, service level, unmet demand, alerts, health banner
-- [ ] Network board: regions, depots, stations, routes with live status colors
-- [ ] Inventory view with fill bars and hours-to-stockout
-- [ ] Risk and alerts list with explanation drawer and forecast chart with
+- [x] Overview: tick, time, status, service level, unmet demand, alerts, health banner
+- [x] Network board: regions, depots, stations, routes with live status colors
+- [x] Inventory view with fill bars and hours-to-stockout
+- [x] Risk and alerts list with explanation drawer and forecast chart with
       confidence band
-- [ ] Recommendation cards: impact, alternatives, confidence, Approve / Reject,
+- [x] Recommendation cards: impact, alternatives, confidence, Approve / Reject,
       what-if preview
-- [ ] Incoming supply and event timeline; decision history with outcomes
-- [ ] Service health panel (backend, database, simulator, prediction, decision
+- [x] Incoming supply and event timeline; decision history with outcomes
+- [x] Service health panel (backend, database, simulator, prediction, decision
       engine, p95 latency, error rate, fallback state)
-- [ ] Simulation controls (run / pause / step) and a clearly labeled crisis
+- [x] Simulation controls (run / pause / step) and a clearly labeled crisis
       injection panel
-- [ ] "Simulated environment. Human review required." banner on recommendations
-- [ ] Loading and error states, degraded-mode display with data age, responsive layout
-- [ ] Frontend in Compose, smoke tests, screenshots in `docs/screenshots/`
+- [x] "Simulated environment. Human review required." banner on recommendations
+- [x] Loading and error states, degraded-mode display with data age, responsive layout
+- [x] Frontend in Compose, smoke tests, screenshots in `docs/screenshots/`
+
+**Verified:** nine screens over the live API, 22 Vitest component tests and 12
+Playwright end-to-end tests against the running stack, all passing. The
+dashboard is served by `docker compose up` on `:5173`. — **Proven live**; see
+[`docs/progress/day5.md`](docs/progress/day5.md).
 
 ### Day 6 (24 Nov): Resilience, observability, crisis drills, load testing
 
