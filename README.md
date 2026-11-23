@@ -29,8 +29,8 @@ Built for the BUP CSE Fest 2026 Hackathon Finals · in association with Poridhi.
 10. [Testing and CI](#10-testing-and-ci)
 11. [7-day build plan](#11-7-day-build-plan)
 12. [Required deliverables map](#12-required-deliverables-map)
-13. [Reference material](#14-reference-material)
-14. [Rules we hold ourselves to](#15-rules-we-hold-ourselves-to)
+13. [Reference material](#13-reference-material)
+14. [Rules we hold ourselves to](#14-rules-we-hold-ourselves-to)
 
 ---
 
@@ -569,7 +569,7 @@ Never cut: the load test, the resilience report, or the fresh-clone test.
 
 ---
 
-## 14. Reference material
+## 13. Reference material
 
 * [`docs/reference/BUP_Fuel_Supply_Simulator_Integration_Guide_Final.pdf`](docs/reference/BUP_Fuel_Supply_Simulator_Integration_Guide_Final.pdf) — **the API source of truth**
 * [`docs/reference/BUP_CSE_FEST_2026_Participant_Facing_Hackathon_Draft.pdf`](docs/reference/BUP_CSE_FEST_2026_Participant_Facing_Hackathon_Draft.pdf) — the brief and the deliverables
@@ -578,7 +578,7 @@ Never cut: the load test, the resilience report, or the fresh-clone test.
 
 ---
 
-## 15. Rules we hold ourselves to
+## 14. Rules we hold ourselves to
 
 * Operate **only** against the simulation environment: no real fuel
   infrastructure, no real credentials, no real dispatches.
