@@ -100,9 +100,8 @@ The operator dashboard — React, Vite and TypeScript, served by `docker compose
 
 ![System architecture: the operator dashboard and the FastAPI backend inside Docker Compose, talking to the organizer-provided simulator, Postgres, Prometheus and Grafana](docs/assets/architecture.png)
 
-The diagram is authored as SVG at
-[`docs/assets/architecture.svg`](docs/assets/architecture.svg) and rasterized
-with `node scripts/render_architecture.mjs`.
+The diagram is a single image at
+[`docs/assets/architecture.png`](docs/assets/architecture.png).
 
 ### What each box does
 
@@ -204,11 +203,11 @@ Observe → Detect → Predict → Decide → Simulate → Act → Monitor → R
 │   ├── prometheus/prometheus.yml
 │   └── grafana/provisioning/      datasources and dashboards, as code
 │
-├── scripts/                       drills, evaluations and the diagram renderer
+├── scripts/                       drills, evaluations and one-off probes
 ├── tests/                         cross-service checks against the live stack
 │
 ├── docs/
-│   ├── assets/architecture.svg    the architecture diagram, editable
+│   ├── assets/architecture.png    the architecture diagram
 │   ├── progress/                  the daily log — day1.md … day7.md
 │   ├── screenshots/               evidence screenshots per day
 │   ├── reference/                 the two organizer PDFs + plain-text extracts
@@ -561,7 +560,7 @@ Never cut: the load test, the resilience report, or the fresh-clone test.
 | 4 | Intelligence component | `backend/app/intelligence/` | **Done** (Day 3) — forecasting, shortage risk, detection, dispatch |
 | 4b | Decision engine | `backend/app/decision/` | **Done** (Day 4) — constraint-aware allocation with human approval |
 | 5 | Operator interface | `frontend/` | **Done** (Day 5) — nine screens over the live API |
-| 6 | Architecture diagram | [`docs/assets/architecture.svg`](docs/assets/architecture.svg), §3 | **Done** — final Day 7 |
+| 6 | Architecture diagram | [`docs/assets/architecture.png`](docs/assets/architecture.png), §3 | **Done** — final Day 7 |
 | 7 | Deployment | `docker-compose.yml`, `.github/workflows/ci.yml` | Compose done, CI/CD final Day 7 |
 | 8 | Observability evidence | Grafana dashboards, `/metrics`, JSON logs | Metrics and logs done (Days 2–3), dashboards Day 6 |
 | 9 | Resilience demonstration | [`docs/fault-tests.md`](docs/fault-tests.md), `docs/resilience-report.md` | Fault tests done (Day 2), full report Day 6 |
