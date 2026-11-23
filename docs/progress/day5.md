@@ -49,18 +49,23 @@ end-to-end tests passing.
 
 | | |
 |---|---|
-| ![Overview](screenshots/overview.png) | ![Network](screenshots/network.png) |
+| ![Overview](../screenshots/overview.png) | ![Network](../screenshots/network.png) |
 | **Overview** — the clock, the service level, unmet demand, the health banner and the alerts | **Network** — the topology, with live status colours |
-| ![Inventory](screenshots/inventory.png) | ![Risk & alerts](screenshots/risk-alerts.png) |
+| ![Inventory](../screenshots/inventory.png) | ![Risk & alerts](../screenshots/risk-alerts.png) |
 | **Inventory** — every tank and depot, per fuel, with cover | **Risk & alerts** — worst first, with the alert ledger below |
-| ![Recommendations](screenshots/recommendations.png) | ![Service health](screenshots/service-health.png) |
+| ![Recommendations](../screenshots/recommendations.png) | ![Service health](../screenshots/service-health.png) |
 | **Recommendations** — before → after, constraints, signals, approve or reject | **Service health** — every dependency, the latency and the error rate |
-| ![Simulation](screenshots/simulation.png) | ![Responsive](screenshots/responsive-mobile.png) |
-| **Simulation** — run, pause, step and inject a crisis | **Responsive** — the same dashboard on a phone |
+| ![Simulation](../screenshots/simulation.png) | ![Day 1](../screenshots/day1/day1_fronted.png) |
+| **Simulation** — run, pause, step and inject a crisis | **Day 1** — the simulator client and the first API routes |
 
 The risk drawer, which is where the explanations live:
 
-![The risk explanation drawer](screenshots/risk-explanation-drawer.png)
+![The risk explanation drawer](../screenshots/risk-explanation-drawer.png)
+
+And the same dashboard on a phone, where the sidebar collapses behind the menu
+button and every grid stacks into one column:
+
+![The dashboard on a 430 px screen](../screenshots/responsive-mobile.png)
 
 ---
 

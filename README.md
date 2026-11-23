@@ -89,10 +89,20 @@ The operator dashboard — React, Vite and TypeScript, served by `docker compose
 | ![The service health panel](docs/screenshots/service-health.png) | ![The simulation controls](docs/screenshots/simulation.png) |
 | **Service health** — every dependency, the p95 latency, the error rate, the fallback state | **Simulation** — run, pause, step and inject a crisis, clearly labelled *simulation only* |
 
-| Responsive | Day 1 |
-|---|---|
-| ![The dashboard on a 430 px screen](docs/screenshots/responsive-mobile.png) | ![The Day 1 foundation](docs/screenshots/day1/day1_fronted.png) |
-| **Responsive** — the same dashboard on a phone | **Day 1** — the foundation: the simulator client and the first API routes |
+### Responsive
+
+The layout holds on a phone: the sidebar collapses behind the menu button and
+every grid stacks into a single column.
+
+![The dashboard on a 430 px screen](docs/screenshots/responsive-mobile.png)
+
+**Responsive** — the same dashboard at 430 px, captured full page.
+
+### Day 1
+
+![The Day 1 foundation](docs/screenshots/day1/day1_fronted.png)
+
+**Day 1** — the foundation: the simulator client and the first API routes.
 
 ---
 

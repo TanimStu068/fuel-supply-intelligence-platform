@@ -25,7 +25,7 @@
 | Prometheus metrics for all seven series | ✅ | See the metric list below |
 | Read APIs over the stored state | ✅ | 8 new endpoints |
 | Tests for SSE reconnect, stale, degraded | ✅ | 107 unit + 14 integration + 10 fault checks |
-| Real fault test via `POST /admin/faults` | ✅ | [`docs/fault-tests.md`](docs/fault-tests.md) |
+| Real fault test via `POST /admin/faults` | ✅ | [`docs/fault-tests.md`](../fault-tests.md) |
 | **Backend survives the simulator being stopped** | ✅ | Degraded in 5 s, recovered in 5 s |
 
 ---
