@@ -29,9 +29,8 @@ Built for the BUP CSE Fest 2026 Hackathon Finals · in association with Poridhi.
 10. [Testing and CI](#10-testing-and-ci)
 11. [7-day build plan](#11-7-day-build-plan)
 12. [Required deliverables map](#12-required-deliverables-map)
-13. [Evaluation criteria and where we address them](#13-evaluation-criteria-and-where-we-address-them)
-14. [Reference material](#14-reference-material)
-15. [Rules we hold ourselves to](#15-rules-we-hold-ourselves-to)
+13. [Reference material](#14-reference-material)
+14. [Rules we hold ourselves to](#15-rules-we-hold-ourselves-to)
 
 ---
 
@@ -568,20 +567,6 @@ Never cut: the load test, the resilience report, or the fresh-clone test.
 | 9 | Resilience demonstration | [`docs/fault-tests.md`](docs/fault-tests.md), `docs/resilience-report.md` | Fault tests done (Day 2), full report Day 6 |
 | 10 | Load-test evidence | `docs/load-test-report.md` | Day 6 |
 | 11 | Final demo | `docs/demo-script.md` | Day 7 |
-
----
-
-## 13. Evaluation criteria and where we address them
-
-| Criterion | Weight | Our focus |
-|---|---|---|
-| Working product and UX | 20% | The operator dashboard — nine screens, live data, no placeholders (Day 5) |
-| Intelligence and decision quality | 20% | Forecasting, risk, the constraint-aware allocator (Days 3 and 4) |
-| Architecture and integration | 15% | The typed simulator client, the sync service (Days 1 and 2) |
-| DevOps and engineering quality | 15% | Compose, CI/CD, 351 tests (Days 1, 5 and 7) |
-| Resilience and incident response | 15% | Fallbacks, degraded mode, crisis drills (Days 2, 4, 6) |
-| Observability and performance | 10% | Prometheus, Grafana, load tests (Days 2 and 6) |
-| Demo and problem understanding | 5% | The demo script and the dry run (Day 7) |
 
 ---
 
