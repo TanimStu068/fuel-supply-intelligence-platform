@@ -4,7 +4,7 @@ Intelligent decision-support and resilience platform for a simulated fuel supply
 network. (in association
 with Poridhi.io).
 
-> **Status:** Day 4 of 7 complete. Days 5 to 7 are planned below.
+> **Status:** Day 5 of 7 complete. Days 6 to 7 are planned below.
 > Submission deadline: **26 November 2026**.
 > Latest report: [`docs/progress/day4.md`](docs/progress/day4.md)
 
@@ -121,7 +121,7 @@ to `main` and an update to the company.
 | 2 | 20 Nov | Data layer, live state sync, logging and metrics | Done |
 | 3 | 21 Nov | Intelligence layer (forecast, shortage prediction, detection) | Done |
 | 4 | 22 Nov | Decision engine, recommendations, simulate and act | Done |
-| 5 | 23 Nov | Operator dashboard | Planned |
+| 5 | 23 Nov | Operator dashboard | Done |
 | 6 | 24 Nov | Resilience, observability, crisis drills, load testing | Planned |
 | 7 | 25 Nov | CI/CD, tests, docs, demo prep, release `v1.0.0` | Planned |
 | Buffer | 26 Nov | Fresh-clone test and submission only | Planned |
