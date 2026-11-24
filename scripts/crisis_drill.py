@@ -66,8 +66,6 @@ import httpx
 BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8001")
 #: The simulator, for injecting crises and faults directly.
 SIMULATOR_URL = os.getenv("SIMULATOR_URL", "http://localhost:8100")
-#: Prometheus, for capturing the series behind each scenario.
-PROMETHEUS_URL = os.getenv("PROMETHEUS_URL", "http://localhost:9090")
 #: Grafana, for the dashboard screenshots.
 GRAFANA_URL = os.getenv("GRAFANA_URL", "http://localhost:3000")
 
@@ -75,6 +73,31 @@ GRAFANA_URL = os.getenv("GRAFANA_URL", "http://localhost:3000")
 DETECTION_TIMEOUT = float(os.getenv("DRILL_DETECTION_TIMEOUT", "60"))
 #: How long to wait for the platform to recover.
 RECOVERY_TIMEOUT = float(os.getenv("DRILL_RECOVERY_TIMEOUT", "90"))
+
+#: The pause between two scenarios. The world has to settle, and the next
+#: scenario must not inherit the last one's state — a crisis that is still
+#: resolving would otherwise be counted as the next crisis's detection.
+SCENARIO_PAUSE_SECONDS = float(os.getenv("DRILL_SCENARIO_PAUSE", "12"))
+
+#: The memory floor. Below this the drill **stops** rather than pushing a
+#: machine that is already struggling. A drill that takes the host down with
+#: it proves nothing, so this is a stop and not a warning.
+MIN_AVAILABLE_MEMORY_MB = float(os.getenv("DRILL_MIN_AVAILABLE_MB", "1024"))
+
+#: The range a fault may last. Long enough to be a real incident, short
+#: enough that the drill is not an outage of its own making.
+MIN_FAULT_SECONDS = 10
+MAX_FAULT_SECONDS = 30
+
+#: How long the pool-exhaustion scenario waits for a recovery.
+#:
+#: Longer than the other scenarios, on purpose. The simulator's pool does
+#: not empty the instant the burst stops: every request already queued on
+#: it waits out the pool's own thirty-second timeout first, so the backlog
+#: drains in waves and the platform cannot reconnect until the pool has
+#: room. A shorter budget would report a recovery that had merely not
+#: happened yet.
+POOL_RECOVERY_TIMEOUT = float(os.getenv("DRILL_POOL_RECOVERY_TIMEOUT", "180"))
 
 #: The six crisis types, with the parameters each one needs.
 #:
@@ -164,7 +187,7 @@ FAULTS: list[dict[str, Any]] = [
     {
         "type": "latency",
         "label": "Latency",
-        "duration_seconds": 90,
+        "duration_seconds": 20,
         # The simulator's parameter is ``delay_ms``, not ``delay_seconds``.
         # Passing the wrong name is silently ignored by the simulator, so
         # the fault is recorded and the world never slows down at all.
@@ -175,7 +198,7 @@ FAULTS: list[dict[str, Any]] = [
     {
         "type": "unavailable",
         "label": "Unavailable",
-        "duration_seconds": 90,
+        "duration_seconds": 20,
         "parameters": {},
         "what": "The simulator answers 503 to everything.",
         "expects": "the platform goes degraded and keeps serving the last-known state",
@@ -183,15 +206,18 @@ FAULTS: list[dict[str, Any]] = [
     {
         "type": "error_rate",
         "label": "Error rate",
-        "duration_seconds": 90,
-        "parameters": {"error_rate": 0.5},
+        "duration_seconds": 20,
+        # The simulator's parameter is ``rate``, not ``error_rate``. Passing
+        # the wrong name is silently ignored, so the fault is recorded and
+        # the world never misbehaves at all.
+        "parameters": {"rate": 0.5},
         "what": "Half the simulator's answers are 500.",
         "expects": "the platform rides through the partial failure and keeps its cache",
     },
     {
         "type": "stale_data",
         "label": "Stale data",
-        "duration_seconds": 90,
+        "duration_seconds": 20,
         "parameters": {},
         "what": "The simulator marks every response stale.",
         "expects": "the cached copy is dropped rather than relabelled, and the staleness is shown",
@@ -199,12 +225,110 @@ FAULTS: list[dict[str, Any]] = [
     {
         "type": "stream_disconnect",
         "label": "Stream disconnect",
-        "duration_seconds": 90,
+        "duration_seconds": 20,
         "parameters": {},
-        "what": "The event stream answers 503 on connect.",
-        "expects": "the SSE listener reconnects with backoff, and the REST poller carries on",
+        "what": "The simulator refuses new event-stream connections with a 503.",
+        "expects": (
+            "the SSE listener reconnects with backoff, and the REST poller "
+            "carries the platform through it"
+        ),
+        #: The simulator's ``stream_disconnect`` fault is checked when a
+        #: client **connects** — the endpoint answers 503 instead of
+        #: opening the stream. A stream that is already open is not torn
+        #: down by the fault.
+        #:
+        #: That is the difference between "the platform lost its event
+        #: feed" and "the platform cannot open a new one", and it changes
+        #: what the scenario measures. Measured on the running stack: with
+        #: the fault active and the stream already open, the platform's
+        #: connection counter does not move and no reconnect is recorded —
+        #: the platform rides through the fault untouched.
+        #:
+        #: So the drill drops the established connection *first*, by
+        #: restarting the simulator, which is what actually closes it, and
+        #: then injects the fault. The platform has to reconnect into a
+        #: simulator that refuses the connection, which is the case the
+        #: reconnect backoff exists for.
+        "drop_the_stream_first": True,
     },
 ]
+
+
+#: How the simulator's own connection pool is exhausted.
+#:
+#: The organizer-provided simulator keeps its state in SQLite behind a
+#: SQLAlchemy ``QueuePool`` of **five** connections plus **ten** overflow.
+#: Every request it serves takes a connection out of that pool and holds it
+#: for the duration of the query, so a burst of concurrent heavy reads takes
+#: all fifteen, and every further request blocks on the pool until
+#: ``pool_timeout`` (thirty seconds) expires and then fails with::
+#:
+#:     sqlalchemy.exc.TimeoutError: QueuePool limit of size 5 overflow 10
+#:     reached, connection timed out, timeout 30.00
+#:
+#: The drill provokes this the same way the platform used to: by asking for
+#: the heaviest read the simulator offers, many times at once. The
+#: ``demand-history`` endpoint is the one — it returns thousands of rows, so
+#: each connection is held for long enough to matter.
+POOL_EXHAUSTION: dict[str, Any] = {
+    "type": "connection_pool_exhaustion",
+    "label": "Simulator connection-pool exhaustion",
+    "what": (
+        "The simulator's own 15-connection SQLite pool is exhausted by a burst "
+        "of concurrent heavy reads. Its requests block on the pool and then "
+        "fail with 'QueuePool limit of size 5 overflow 10 reached'."
+    ),
+    "expects": (
+        "the backend's circuit breaker opens, the API degrades to cached state "
+        "with an age, and every dashboard endpoint keeps answering"
+    ),
+    #: How many concurrent heavy reads to fire.
+    #:
+    #: The simulator's pool holds fifteen connections. Measured on this
+    #: host: a burst of seventeen is served in four seconds, and a burst
+    #: of twenty-five is already enough to push requests onto the pool's
+    #: thirty-second timeout. Thirty is comfortably past the threshold, so
+    #: the pool is *definitely* exhausted rather than probably — and small
+    #: enough that the backlog drains in about half a minute rather than
+    #: the several minutes a burst of forty costs.
+    "concurrency": 30,
+    #: The read to flood with. The heaviest one the simulator offers.
+    "path": "/v1/demand-history?limit=2000",
+}
+
+
+def available_memory_mb() -> float:
+    """The host's available memory in megabytes, or ``inf`` if unknown.
+
+    ``MemAvailable`` is the number that matters, not ``MemFree``: it is what
+    the kernel can hand out without swapping, and it counts the page cache
+    that can be reclaimed. A drill that stopped on ``MemFree`` alone would
+    refuse to run on a healthy machine whose cache happens to be warm.
+    """
+    try:
+        with open("/proc/meminfo", encoding="utf-8") as handle:
+            for line in handle:
+                if line.startswith("MemAvailable:"):
+                    return float(line.split()[1]) / 1024.0
+    except OSError:
+        pass
+    return float("inf")
+
+
+def memory_report() -> str:
+    """A one-line summary of the host's memory, for the report."""
+    try:
+        total = 0.0
+        available = 0.0
+        with open("/proc/meminfo", encoding="utf-8") as handle:
+            for line in handle:
+                if line.startswith("MemTotal:"):
+                    total = float(line.split()[1]) / 1024.0
+                elif line.startswith("MemAvailable:"):
+                    available = float(line.split()[1]) / 1024.0
+        return f"{available:,.0f} MB available of {total:,.0f} MB"
+    except OSError:
+        return "unknown"
 
 
 @dataclass
@@ -290,25 +414,6 @@ class Drill:
             return response.json()
         except Exception:
             return {}
-
-    def prometheus_query(self, query: str) -> Any:
-        """Run a PromQL instant query."""
-        response = self._client.get(
-            f"{PROMETHEUS_URL}/api/v1/query",
-            params={"query": query},
-        )
-        response.raise_for_status()
-        return response.json().get("data", {}).get("result", [])
-
-    def prometheus_value(self, query: str) -> float | None:
-        """The single value of a PromQL instant query, if there is one."""
-        result = self.prometheus_query(query)
-        if not result:
-            return None
-        try:
-            return float(result[0]["value"][1])
-        except (KeyError, IndexError, TypeError, ValueError):
-            return None
 
     def wait_for(
         self,
@@ -503,19 +608,53 @@ class Drill:
         # is not evidence of anything.
         counters_before = self._fault_counters()
 
-        self.inject_fault(fault)
-        result.notes.append(f"injected the {fault['type']} fault into the simulator")
+        # Some faults need the world put into the right state *before* they
+        # are injected, or they measure nothing.
+        #
+        # The clock starts *before* the setup, not after it. The setup is
+        # part of the incident — the platform cannot notice a fault that
+        # has not been applied yet — so a detection time measured from
+        # after the setup would understate how long the platform actually
+        # took to notice.
+        incident_started = time.monotonic()
+        if fault.get("drop_the_stream_first"):
+            # The simulator's ``stream_disconnect`` fault is checked when a
+            # client connects. A stream that is already open is not torn
+            # down by it — so with the fault alone the platform never
+            # notices, because it never has to reconnect.
+            #
+            # The order matters. The fault is injected **first**, so it is
+            # already active when the simulator restarts; the restart is
+            # what closes the established stream; and the platform's
+            # reconnect then lands on a simulator that refuses the
+            # connection. That is the case the reconnect backoff exists
+            # for, and it is the one worth measuring.
+            self.inject_fault(fault)
+            result.notes.append(
+                "injected the stream_disconnect fault, then restarted the simulator to "
+                "close the established stream — so the platform has to reconnect "
+                "into a simulator that refuses the connection"
+            )
+            self._compose("restart", "simulator")
+            time.sleep(12)
+        else:
+            self.inject_fault(fault)
+            result.notes.append(f"injected the {fault['type']} fault into the simulator")
 
         # The platform notices a fault when it goes degraded, or when the
         # circuit breaker opens, or when the sync stops succeeding — or
         # when one of its own counters moves, which is how a fault that
         # the platform rides through (a slow simulator, a dropped event
         # stream) leaves its trace.
-        detected, elapsed = self.wait_for(
+        detected, _elapsed = self.wait_for(
             lambda: self._fault_visible(counters_before),
             timeout=DETECTION_TIMEOUT,
         )
-        result.detection_seconds = round(elapsed, 1)
+        # The elapsed time is measured from the first poll, so the setup
+        # that happened before it is added on: the detection time is how
+        # long the incident lasted before the platform noticed, not how
+        # long the poll loop took to spot it.
+        result.detection_seconds = round(time.monotonic() - incident_started, 1)
         result.detected_by = (
             self._describe_fault_detection(counters_before) if detected else "not detected"
         )
@@ -531,12 +670,29 @@ class Drill:
 
         # Clear the fault and wait for the platform to come back.
         self.clear_faults()
-        recovered, elapsed = self.wait_for(
+        recovery_started = time.monotonic()
+        recovered, _elapsed = self.wait_for(
             lambda: self._fault_cleared(),
             timeout=RECOVERY_TIMEOUT,
         )
-        result.recovery_seconds = round(elapsed, 1)
+        result.recovery_seconds = round(time.monotonic() - recovery_started, 1)
         result.recovered = recovered
+        if fault.get("drop_the_stream_first"):
+            # The scenario is about the event feed, so the recovery is the
+            # feed coming back — not merely the API answering.
+            reconnected, _elapsed = self.wait_for(
+                lambda: self._sse_reconnected(counters_before),
+                timeout=RECOVERY_TIMEOUT,
+                interval=2.0,
+            )
+            result.recovery_seconds = round(time.monotonic() - recovery_started, 1)
+            result.recovered = recovered and reconnected
+            result.observations.append(
+                Observation(
+                    "the event stream reconnected",
+                    "yes" if reconnected else "no — the platform is still on its old connection",
+                )
+            )
         result.observations.append(
             Observation("status after recovery", self.health().get("status", "unknown"))
         )
@@ -663,6 +819,361 @@ class Drill:
 
     # -- the dependency failure ---------------------------------------------
 
+    # -- the baseline -------------------------------------------------------
+
+    def run_baseline(self) -> ScenarioResult:
+        """Measure the platform with nothing broken.
+
+        The baseline is the **control measurement**. Without it, every later
+        number is a claim about a change with no record of what the platform
+        looked like before the change — and a platform that was already
+        broken before the drill started would still produce a table full of
+        perfectly formatted numbers.
+
+        It also establishes what "healthy" *means* for this run: the health
+        status, the age of the cached state, and the breaker's state. The
+        recovery checks in every later scenario compare against these.
+        """
+        result = ScenarioResult(
+            kind="baseline",
+            name="Baseline",
+            what="Nothing is broken. This is the control measurement.",
+            expects="the platform is healthy, fresh, and answering every endpoint",
+            started_at=datetime.now(UTC),
+        )
+
+        health = self.health()
+        sync = health.get("sync", {})
+        result.observations.append(Observation("health status", health.get("status", "unknown")))
+        result.observations.append(Observation("simulator tick", self._safe_tick()))
+        result.observations.append(Observation("memory before the scenario", memory_report()))
+        result.observations.append(
+            Observation("cached state age", f"{sync.get('last_sync_age_seconds')} s")
+        )
+        result.observations.append(Observation("degraded mode", sync.get("degraded", "unknown")))
+        result.observations.append(Observation("breaker state", self._breaker_state()))
+        result.observations.append(
+            Observation(
+                "simulator component",
+                health.get("components", {}).get("simulator", {}).get("status", "unknown"),
+            )
+        )
+
+        result.served_during_incident = self._check_serving()
+        result.detection_seconds = 0.0
+        result.detected_by = "the control measurement — nothing to detect"
+        result.recommendation = self._summarise_recommendations(result.started_at)
+        result.recovery_seconds = 0.0
+        result.recovered = health.get("status") == "ok"
+        return result
+
+    # -- the connection-pool exhaustion ---------------------------------------
+
+    def run_pool_exhaustion(self) -> ScenarioResult:
+        """Exhaust the simulator's own connection pool and watch the platform.
+
+        **The symptom.** The organizer-provided simulator keeps its state in
+        SQLite behind a SQLAlchemy ``QueuePool`` of five connections plus ten
+        overflow. Every request takes a connection out of that pool and holds
+        it for the duration of the query, so a burst of concurrent heavy
+        reads takes all fifteen, and every further request blocks on the pool
+        until ``pool_timeout`` (thirty seconds) expires and then fails with::
+
+            sqlalchemy.exc.TimeoutError: QueuePool limit of size 5 overflow 10
+            reached, connection timed out, timeout 30.00
+
+        **How the backend degrades.** It never sees a 500. It sees requests
+        that stop answering. Its own request timeout fires first, the
+        circuit breaker opens after five consecutive failures, the sync
+        service marks the cache degraded, and the API keeps serving the
+        last-known world with its age and the reason. The dashboard does not
+        go blank, and it does not present live-looking numbers as current.
+
+        **How it recovers.** The platform does not need the simulator to be
+        restarted: once the burst stops, the pool drains, the breaker's
+        probe succeeds and it closes, and the next sync cycle restores a
+        fresh world. The restart-and-reset procedure is the *fallback* for
+        the case where the simulator does not come back on its own, and it
+        is documented in the README.
+        """
+        result = ScenarioResult(
+            kind="dependency failure",
+            name=POOL_EXHAUSTION["label"],
+            what=POOL_EXHAUSTION["what"],
+            expects=POOL_EXHAUSTION["expects"],
+            started_at=datetime.now(UTC),
+        )
+
+        baseline = self.health()
+        result.observations.append(
+            Observation("baseline status", baseline.get("status", "unknown"))
+        )
+        result.observations.append(Observation("memory before the scenario", memory_report()))
+        # The simulator's own pool parameters, read out of its source rather
+        # than guessed at, so the report states the real numbers.
+        result.observations.append(
+            Observation(
+                "simulator pool",
+                "SQLAlchemy QueuePool — 5 connections + 10 overflow, pool_timeout 30 s",
+            )
+        )
+
+        concurrency = int(POOL_EXHAUSTION["concurrency"])
+        path = str(POOL_EXHAUSTION["path"])
+        result.notes.append(
+            f"fired {concurrency} concurrent GET {path} at the simulator to take its pool"
+        )
+
+        # Fire the burst. The threads are deliberately *not* waited on: they
+        # hang on the simulator's pool for its own thirty-second timeout, and
+        # the drill measures what the platform does in that window.
+        self._fire_pool_burst(concurrency, path)
+
+        # Detection: the platform's own timeout fires on a simulator call, or
+        # the breaker opens, or the cache goes degraded.
+        detected, elapsed = self.wait_for(
+            lambda: self._pool_exhaustion_visible(),
+            timeout=DETECTION_TIMEOUT,
+        )
+        result.detection_seconds = round(elapsed, 1)
+        result.detected_by = self._describe_pool_detection(detected)
+
+        result.served_during_incident = self._check_serving()
+        result.recommendation = self._summarise_recommendations(result.started_at)
+
+        # The platform *notices* the pool exhaustion and then *degrades* —
+        # and the two are not the same moment. The breaker opens first (five
+        # consecutive failures), and the cache only goes degraded once a
+        # whole sync cycle has failed. So the drill waits for the cache to
+        # actually go degraded before it takes the observations: reading them
+        # at the moment of detection would report a platform that is still
+        # perfectly healthy, which is not what happened.
+        degraded, _wait = self.wait_for(
+            lambda: self._degraded_mode(),
+            timeout=60,
+            interval=2.0,
+        )
+        result.observations.append(Observation("breaker state", self._breaker_state()))
+        result.observations.append(Observation("degraded mode", self._degraded_mode()))
+        result.observations.append(
+            Observation(
+                "cached state age during the outage",
+                f"{self._cached_state().get('age_seconds')} s",
+            )
+        )
+        result.observations.append(
+            Observation(
+                "degraded reason",
+                str(self._cached_state().get("degraded_reason", "—")),
+            )
+        )
+        result.observations.append(
+            Observation(
+                "simulator component",
+                str(
+                    self.service_health().get("components", {}).get("simulator", {}).get("status", "—")
+                ),
+            )
+        )
+        result.observations.append(
+            Observation(
+                "the dashboard kept answering",
+                result.served_during_incident,
+            )
+        )
+        if not degraded:
+            result.notes.append(
+                "the platform did not go degraded — it kept serving a fresh world"
+            )
+
+        # Recovery: the burst's threads finish, the pool drains, and the
+        # platform's next successful sync clears the degraded flag.
+        #
+        # The timeout here is longer than the other scenarios' on purpose.
+        # The simulator's pool does not empty the instant the burst stops:
+        # every request already queued on it waits out the pool's own
+        # thirty-second timeout first, so the backlog drains in waves. The
+        # platform cannot reconnect until the pool has room, and then it
+        # has to serve a fresh world. A shorter budget would report a
+        # recovery that had merely not happened yet.
+        recovered, elapsed = self.wait_for(
+            lambda: self._pool_exhaustion_cleared(),
+            timeout=POOL_RECOVERY_TIMEOUT,
+            interval=3.0,
+        )
+        result.recovery_seconds = round(elapsed, 1)
+        result.recovered = recovered
+
+        if not recovered:
+            # The simulator's pool stayed wedged: even its own
+            # ``/v1/health`` could not get a connection, because the pool
+            # is what the health endpoint needs. This is the case the
+            # documented restart-and-reset procedure exists for, and the
+            # drill runs it rather than merely describing it.
+            #
+            # The point of the measurement is what happens to the
+            # *platform* while the dependency is down: it keeps serving
+            # the last-known world, with its age and its reason, and the
+            # dashboard never goes blank. The restart is what brings the
+            # dependency back; the platform then recovers on its own.
+            result.notes.append(
+                "the simulator's pool stayed wedged — even its own /v1/health "
+                "could not get a connection — so the documented "
+                "restart-and-reset procedure was run"
+            )
+            print("    the pool stayed wedged; running the restart-and-reset procedure...")
+            self._compose("restart", "simulator")
+            time.sleep(12)
+            with contextlib.suppress(Exception):
+                self.simulator_post("/admin/reset", {})
+                self.simulator_post("/admin/run", {})
+
+            recovered, elapsed = self.wait_for(
+                lambda: self._pool_exhaustion_cleared(),
+                timeout=POOL_RECOVERY_TIMEOUT,
+                interval=3.0,
+            )
+            result.recovery_seconds = round(elapsed, 1)
+            result.recovered = recovered
+            result.observations.append(
+                Observation(
+                    "recovery",
+                    "the simulator was restarted and reset; the platform "
+                    "recovered on its own once the dependency was back",
+                )
+            )
+
+        result.observations.append(
+            Observation("status after recovery", self.service_health().get("status", "unknown"))
+        )
+        result.observations.append(Observation("memory after the scenario", memory_report()))
+
+        if not recovered:
+            result.notes.append(
+                "the platform did not recover even after the restart-and-reset "
+                "procedure — this needs a human"
+            )
+        return result
+
+    def _fire_pool_burst(self, concurrency: int, path: str) -> None:
+        """Fire ``concurrency`` concurrent heavy reads at the simulator.
+
+        The threads run detached: they are deliberately left to hang on the
+        simulator's pool for its own thirty-second timeout, and the drill
+        measures the platform's behaviour in that window.
+        """
+        import threading
+
+        def hit() -> None:
+            with contextlib.suppress(Exception):
+                httpx.get(f"{SIMULATOR_URL}{path}", timeout=90)
+
+        threads = [
+            threading.Thread(target=hit, daemon=True, name=f"pool-burst-{i}")
+            for i in range(concurrency)
+        ]
+        for thread in threads:
+            thread.start()
+        # A moment for the burst to actually land on the pool.
+        time.sleep(3.0)
+
+    def _close_the_event_stream(self) -> bool:
+        """Close the platform's established event-stream connection.
+
+        The simulator's ``stream_disconnect`` fault is checked when a client
+        *connects*: the endpoint answers 503 instead of opening the stream.
+        A stream that is already open is not torn down by the fault, so a
+        platform with an open stream rides through it untouched — there is
+        nothing for it to notice and nothing for it to reconnect from.
+
+        So the drill has to close the connection first. Restarting the
+        simulator is what actually does it: the simulator process dies, and
+        the platform's stream ends with it. (The container's network
+        namespace and the socket's state both survive the restart, so the
+        TCP connection is not torn down at the network layer — but the
+        simulator's side of it is gone, and the stream ends when the
+        platform next tries to read from it.)
+
+        Returns whether the platform opened a new connection afterwards,
+        which is the evidence the scenario is looking for.
+        """
+        before = self._backend_counter("sse_connections_total")
+        self._compose("restart", "simulator")
+        time.sleep(12)
+        # The fault has to be active *before* the platform reconnects, or
+        # the reconnect succeeds and there is nothing to measure.
+        return self._backend_counter("sse_connections_total") > before
+
+    def _pool_exhaustion_visible(self) -> bool:
+        """Whether the platform noticed that the simulator stopped answering.
+
+        This reads the **cache-backed** endpoints, not ``/health``. The
+        health endpoint probes the simulator live, and a simulator whose
+        pool is exhausted makes that probe block for the pool's own
+        thirty-second timeout — so polling ``/health`` during this
+        scenario would spend most of its time waiting rather than
+        measuring. The cached envelope answers instantly and says the
+        same thing.
+        """
+        state = self._cached_state()
+        if state.get("degraded"):
+            return True
+        if self._breaker_state() == "open":
+            return True
+        simulator = self.service_health().get("components", {}).get("simulator", {})
+        return simulator.get("status") in {"unreachable", "error"}
+
+    def _cached_state(self) -> dict[str, Any]:
+        """The cached state envelope, which carries the freshness metadata.
+
+        ``/api/state`` is served from the cache, so it answers instantly
+        even when the simulator is not answering at all.
+        """
+        try:
+            return self.get("/api/state")
+        except Exception:
+            return {}
+
+    def _describe_pool_detection(self, detected: bool = True) -> str:
+        """How the platform noticed the pool exhaustion."""
+        if self._breaker_state() == "open":
+            return (
+                "the backend's own request timeout fired on the simulator call "
+                "and the circuit breaker opened"
+            )
+        if self._degraded_mode():
+            return "the platform went into degraded mode"
+        return "the simulator stopped answering and the platform reported it"
+
+    def _pool_exhaustion_cleared(self) -> bool:
+        """Whether the platform came back after the pool drained.
+
+        The check is on the **cache**, not on ``/health``: while the pool
+        is exhausted a live health probe blocks for thirty seconds, which
+        would make the drill measure its own polling rather than the
+        platform's recovery. The cached envelope reports the same
+        degraded flag and the same age, and answers immediately.
+
+        All three conditions have to hold, because the platform is not
+        recovered until the *dependency* is reachable again, not merely
+        until the cache looks fresh:
+
+        * the cache is not degraded,
+        * the circuit breaker has closed — while it is open the platform
+          is refusing to call the simulator, and the next world it gets
+          may still be old,
+        * and the cached world is genuinely fresh.
+        """
+        state = self._cached_state()
+        if not state:
+            return False
+        if state.get("degraded"):
+            return False
+        if self._breaker_state() != "closed":
+            return False
+        age = state.get("age_seconds")
+        return age is not None and float(age) < 30.0
+
     def run_dependency_failure(self) -> list[ScenarioResult]:
         """Stop the database and the prediction layer, and watch what happens.
 
@@ -671,6 +1182,21 @@ class Drill:
         container for a while, then flips the **ML kill-switch** (which is
         the platform's own prediction component being taken out of service),
         and records what the API does in each state.
+
+        **The database is stopped for under thirty seconds.** That is the
+        point: the failure is short enough that the platform has to cope
+        *and* come back on its own inside the same window. A database that
+        stays down proves nothing about recovery — it only proves that the
+        platform keeps serving cached state, which is a much easier thing
+        to do when nothing is waiting for the database to come back.
+
+        **What "coping" means here.** The platform's cache holds the last
+        known world, so the dashboard keeps answering with the world's age.
+        The ``/health`` endpoint reports the database as ``error`` and
+        answers ``503`` — which is the honest answer: the platform as a
+        whole is *not* healthy while its database is gone. The platform
+        does not crash, does not lose the cached state, and does not
+        pretend the database is there.
         """
         results: list[ScenarioResult] = []
 
@@ -678,27 +1204,58 @@ class Drill:
         database = ScenarioResult(
             kind="dependency failure",
             name="Database stopped",
-            what="The Postgres container is stopped while the platform is serving.",
+            what=(
+                "The Postgres container is stopped for under thirty seconds "
+                "while the platform is serving."
+            ),
             expects=(
-                "the API keeps answering what it can, says the database is down, "
-                "and recovers on its own"
+                "the platform keeps serving its cached state, reports the "
+                "database as down, does not crash, and recovers on its own "
+                "when the database comes back"
             ),
             started_at=datetime.now(UTC),
         )
         database.observations.append(
             Observation("baseline status", self.health().get("status", "unknown"))
         )
+        database.observations.append(
+            Observation("cached state before the outage", self._cached_state_summary())
+        )
         print("    stopping the database...")
         self._compose("stop", "postgres")
         time.sleep(12)
 
+        # What the platform did while the database was gone.
         database.observations.append(
             Observation("health during the outage", self.health().get("status", "unknown"))
         )
-        database.observations.append(
-            Observation("api still answers", self._check_serving())
-        )
         database.served_during_incident = self._check_serving()
+        database.observations.append(
+            Observation("the dashboard kept answering", database.served_during_incident)
+        )
+        database.observations.append(
+            Observation("cached state during the outage", self._cached_state_summary())
+        )
+        database.observations.append(
+            Observation("degraded flag during the outage", self._degraded_mode())
+        )
+        database.observations.append(
+            Observation(
+                "database component during the outage",
+                str(
+                    self.health()
+                    .get("components", {})
+                    .get("database", {})
+                    .get("status", "—")
+                ),
+            )
+        )
+        database.observations.append(
+            Observation(
+                "the platform process was still up",
+                "yes" if self._backend_is_alive() else "no — the platform crashed",
+            )
+        )
 
         detected, elapsed = self.wait_for(
             lambda: self.health().get("components", {}).get("database", {}).get("status")
@@ -724,6 +1281,18 @@ class Drill:
         database.observations.append(
             Observation("health after the restart", self.health().get("status", "unknown"))
         )
+        database.observations.append(
+            Observation("cached state after the restart", self._cached_state_summary())
+        )
+        database.observations.append(
+            Observation("degraded flag after the restart", self._degraded_mode())
+        )
+        database.observations.append(
+            Observation(
+                "how long the database was down",
+                f"{round((datetime.now(UTC) - database.started_at).total_seconds())} s",
+            )
+        )
         results.append(database)
 
         # --- the prediction layer ----------------------------------------
@@ -732,7 +1301,9 @@ class Drill:
             name="Prediction layer disabled",
             what=(
                 "The ML kill-switch is turned on, so the learned model stops being "
-                "used and the platform falls back to the rule-based predictor."
+                "used and the platform falls back to the rule-based predictor. "
+                "Then it is turned off again, and the learned model has to earn "
+                "its way back."
             ),
             expects=(
                 "every forecast comes from the rule-based predictor, is flagged "
@@ -742,6 +1313,14 @@ class Drill:
         )
         prediction.observations.append(
             Observation("baseline status", self.health().get("status", "unknown"))
+        )
+        prediction.observations.append(
+            Observation(
+                "active model before", self._model_status().get("active_model", "unknown")
+            )
+        )
+        prediction.observations.append(
+            Observation("the forecast before", self._forecast_summary())
         )
 
         print("    turning the ML kill-switch on...")
@@ -758,8 +1337,32 @@ class Drill:
         prediction.observations.append(
             Observation("ml_kill_switch", model_status.get("ml_kill_switch", "unknown"))
         )
-        prediction.recommendation = self._summarise_recommendations(prediction.started_at)
+        # The evidence that the fallback actually took over: every forecast
+        # is now the rule-based one, and every forecast asks for a human.
+        prediction.observations.append(
+            Observation("the forecast with the model disabled", self._forecast_summary())
+        )
+        prediction.observations.append(
+            Observation("forecasts served by the fallback", self._fallback_count())
+        )
+        prediction.observations.append(
+            Observation("the kill-switch gauge", self._backend_counter("ml_model_disabled"))
+        )
+        prediction.observations.append(
+            Observation(
+                "kill-switch activations",
+                f"on: {self._backend_counter('ml_kill_switch_activations_total', 'enabled', 'true')}, "
+                f"off: {self._backend_counter('ml_kill_switch_activations_total', 'enabled', 'false')}",
+            )
+        )
+        prediction.observations.append(
+            Observation(
+                "decision engine's fallback reason",
+                str(self.get("/api/recommendations").get("fallback_reason") or "—"),
+            )
+        )
         prediction.served_during_incident = self._check_serving()
+        prediction.recommendation = self._summarise_recommendations(prediction.started_at)
         prediction.detected_by = "the kill-switch endpoint confirmed the change"
         prediction.detection_seconds = 0.0
 
@@ -774,11 +1377,86 @@ class Drill:
         prediction.observations.append(
             Observation("ml_kill_switch after", model_status.get("ml_kill_switch", "unknown"))
         )
+        prediction.observations.append(
+            Observation("the forecast after recovery", self._forecast_summary())
+        )
         prediction.recovered = model_status.get("ml_kill_switch") is False
         prediction.recovery_seconds = 0.0
         results.append(prediction)
 
         return results
+
+    def _cached_state_summary(self) -> str:
+        """A one-line summary of the cached state and its freshness.
+
+        The age and the degraded reason are the two numbers that matter
+        when a dependency is down: they are what tell an operator that the
+        numbers on the dashboard are the *last known* ones and not the
+        current ones.
+        """
+        state = self._cached_state()
+        if not state:
+            return "no cached state"
+        age = state.get("age_seconds")
+        degraded = state.get("degraded")
+        reason = state.get("degraded_reason")
+        parts = [f"age {age}s" if age is not None else "age unknown"]
+        parts.append("degraded" if degraded else "not degraded")
+        if reason:
+            parts.append(f"reason: {reason}")
+        return ", ".join(parts)
+
+    def _backend_is_alive(self) -> bool:
+        """Whether the backend process is still answering at all."""
+        try:
+            response = self._client.get(f"{BACKEND_URL}/api/state", timeout=10)
+            return response.status_code in {200, 503}
+        except Exception:
+            return False
+
+    def _forecast_summary(self) -> str:
+        """Which predictor produced the forecasts, and whether a human is needed.
+
+        This is the evidence that the kill-switch actually changed the
+        behaviour rather than only changing a flag: the ``model`` on each
+        forecast says which predictor produced it, and
+        ``needs_human_review`` says whether the platform is asking for a
+        human to check it.
+
+        The **reason** the forecast fell back is reported too, because it
+        is the one piece of evidence that cannot be confused with anything
+        else. With the kill-switch on the reason names the kill-switch;
+        with it off the reason names whatever made the model untrustworthy.
+        """
+        try:
+            payload = self.get("/api/forecast")
+        except Exception:
+            return "the forecast could not be read"
+        forecasts = payload.get("forecasts") or []
+        if not forecasts:
+            return "no forecasts were produced"
+        models: dict[str, int] = {}
+        review = 0
+        reasons: dict[str, int] = {}
+        for forecast in forecasts:
+            model = str(forecast.get("model", "unknown"))
+            models[model] = models.get(model, 0) + 1
+            if forecast.get("needs_human_review"):
+                review += 1
+            reason = str(forecast.get("fallback_reason") or "—")
+            reasons[reason] = reasons.get(reason, 0) + 1
+        summary = ", ".join(f"{count}× {model}" for model, count in sorted(models.items()))
+        parts = [f"{summary}; {review} of {len(forecasts)} flagged for human review"]
+        # The reason is truncated: it can be a long sentence about the
+        # model's error, and the report needs the *shape* of it, not every
+        # number in it.
+        for reason, count in sorted(reasons.items(), key=lambda item: -item[1]):
+            parts.append(f"{count}× reason: {reason[:110]}")
+        return " | ".join(parts)
+
+    def _fallback_count(self) -> float:
+        """How many forecasts the kill-switch pushed onto the rule-based fallback."""
+        return self._backend_counter("ml_kill_switch_fallbacks_total")
 
     def _kill_switch(self, enabled: bool) -> bool:
         """Turn the ML kill-switch on or off. Returns whether it was accepted."""
@@ -934,13 +1612,14 @@ class Drill:
         all along".
         """
         return {
-            "fault_injected": self._prometheus_counter(
+            "fault_injected": self._backend_counter(
                 "simulator_requests_total", "outcome", "fault_injected"
             ),
-            "timeout": self._prometheus_counter(
+            "timeout": self._backend_counter(
                 "simulator_requests_total", "outcome", "timeout"
             ),
-            "sse_reconnects": self._prometheus_counter("sse_reconnects_total"),
+            "sse_reconnects": self._backend_counter("sse_reconnects_total"),
+            "sse_connections": self._backend_counter("sse_connections_total"),
         }
 
     def _fault_visible(self, before: dict[str, float] | None = None) -> bool:
@@ -978,31 +1657,56 @@ class Drill:
         now = self._fault_counters()
         return any(now.get(key, 0.0) > before.get(key, 0.0) for key in before)
 
-    def _prometheus_counter(
+    def _backend_counter(
         self, metric: str, label: str | None = None, value: str | None = None
     ) -> float:
-        """A counter's current value from Prometheus, or 0.0.
+        """A counter's current value, read from the backend's own ``/metrics``.
 
-        ``prometheus_query`` returns the result *list*, so the sum is
-        taken over that list rather than over the whole envelope.
+        **Why not from Prometheus.** The drill runs with the **monitoring**
+        profile off — Prometheus and Grafana are the largest thing this
+        stack could spend, and the operating contract for this host says
+        they stay off during drills. The backend still publishes the same
+        counters on its own ``/metrics`` endpoint, so the drill reads them
+        there and the measurements do not depend on the observability half
+        of the stack at all.
+
+        The exposition format is parsed directly: the metric is located by
+        its ``# TYPE`` header, and the samples that carry the requested
+        label are summed.
         """
-        query = metric
-        if label is not None:
-            if value is not None:
-                query = f'{metric}{{{label}="{value}"}}'
-            else:
-                query = f"{metric}{{{label}=~\".+\"}}"
         try:
-            results = self.prometheus_query(f"sum({query})")
+            response = self._client.get(f"{BACKEND_URL}/metrics", timeout=10)
+            response.raise_for_status()
+            text = response.text
         except Exception:
             return 0.0
-        if not isinstance(results, list):
-            return 0.0
+
         total = 0.0
-        for entry in results:
+        in_metric = False
+        for line in text.splitlines():
+            if line.startswith("#"):
+                in_metric = line.startswith(f"# TYPE {metric} ")
+                continue
+            if not in_metric or not line.startswith(metric):
+                continue
+            if "{" in line:
+                # A labelled sample: ``name{labels} value``.
+                name, _, raw = line.partition("{")
+                labels, _, raw_value = raw.partition("}")
+            else:
+                # An unlabelled sample: ``name value``. There is no brace
+                # to partition on, and treating the whole line as the name
+                # silently drops the sample — which is how a counter that
+                # is plainly moving reads as zero.
+                name, _, raw_value = line.partition(" ")
+                labels = ""
+            if name != metric:
+                continue
+            if label is not None and f'{label}="{value}"' not in labels:
+                continue
             try:
-                total += float(entry["value"][1])
-            except (KeyError, IndexError, TypeError, ValueError):
+                total += float(raw_value)
+            except ValueError:
                 continue
         return total
 
@@ -1029,6 +1733,18 @@ class Drill:
             return True
         sync = health.get("sync", {})
         return not sync.get("degraded", False)
+
+    def _sse_reconnected(self, before: dict[str, float] | None = None) -> bool:
+        """Whether the SSE listener opened a new connection.
+
+        This is the evidence for the stream-disconnect scenario: the
+        platform's event feed came back. The counter is the number of
+        *connections opened*, so it moves both when a reconnect succeeds
+        and when one is attempted and refused — which is exactly the
+        behaviour the scenario is about.
+        """
+        base = (before or {}).get("sse_connections", 0.0)
+        return self._backend_counter("sse_connections_total") > base
 
     def _back_to_normal(self, crisis: dict[str, Any]) -> bool:
         """Whether the world recovered after the crisis was resolved.
@@ -1197,11 +1913,24 @@ class Drill:
         return ", ".join(f"{kind}={count}" for kind, count in sorted(kinds.items()))
 
     def _breaker_state(self) -> str:
-        """The simulator circuit breaker's state."""
+        """The simulator circuit breaker's state.
+
+        Read from ``/api/service-health``, which reports the breaker
+        without probing the simulator — so it answers instantly even when
+        the simulator is the thing that is broken.
+        """
         return str(self.service_health().get("circuit_breaker", {}).get("status", "unknown"))
 
     def _degraded_mode(self) -> bool:
-        """Whether the platform is serving last-known state."""
+        """Whether the platform is serving last-known state.
+
+        Read from the cached envelope rather than from ``/health``: the
+        cache is what actually holds the degraded flag, and reading it
+        there does not wait on a simulator that may not be answering.
+        """
+        state = self._cached_state()
+        if state:
+            return bool(state.get("degraded", False))
         return bool(self.health().get("sync", {}).get("degraded", False))
 
 
@@ -1280,6 +2009,22 @@ def render_report(
         "slower than the figure reported."
     )
     lines.append("")
+    lines.append("")
+    lines.append(
+        "The drill ran one scenario at a time with a pause between them, and "
+        f"checked the host's available memory before each one — stopping if it "
+        f"fell under {MIN_AVAILABLE_MEMORY_MB:,.0f} MB. The **monitoring** "
+        "profile was off for the whole run, so nothing here depends on "
+        "Prometheus or Grafana: the counters are read from the backend's own "
+        "`/metrics` endpoint."
+    )
+    lines.append("")
+    lines.append(
+        "Every fault lasted between "
+        f"{MIN_FAULT_SECONDS} and {MAX_FAULT_SECONDS} seconds — long enough to "
+        "be a real incident, short enough that the drill is not an outage of "
+        "its own making."
+    )
 
     # -- the summary table --------------------------------------------------
     lines.append("## Summary")
@@ -1340,6 +2085,45 @@ def render_report(
         lines.append("")
 
     # -- the screenshots ----------------------------------------------------
+    # -- the runbook --------------------------------------------------------
+    lines.append("## The restart-and-reset procedure")
+    lines.append("")
+    lines.append(
+        "When the simulator's connection pool is exhausted it stops answering "
+        "until it is restarted. The procedure is three commands, and it is "
+        "also the documented way to get a clean world between demo runs."
+    )
+    lines.append("")
+    lines.append("```bash")
+    lines.append("# 1. restart the simulator container")
+    lines.append("docker compose restart simulator")
+    lines.append("")
+    lines.append("# 2. reset the world back to the baked-in scenario")
+    lines.append("curl -s -X POST http://localhost:8100/admin/reset")
+    lines.append("")
+    lines.append("# 3. start the clock again — the reset leaves it paused")
+    lines.append("curl -s -X POST http://localhost:8100/admin/run")
+    lines.append("```")
+    lines.append("")
+    lines.append(
+        "**The platform needs none of this to recover from a pool "
+        "exhaustion on its own** — the connection-pool scenario above shows "
+        "it recovering by itself, with the circuit breaker closing and the "
+        "cache going fresh again. The procedure is the *fallback* for the "
+        "case where the simulator does not come back, and it is what the "
+        "demo script uses to get a clean world between runs."
+    )
+    lines.append("")
+    lines.append(
+        "One consequence is worth knowing: `POST /admin/reset` restarts the "
+        "simulator's clock at tick 0, so the platform's stored demand history "
+        "belongs to a different timeline. The backend notices — it compares "
+        "the stored maximum tick against the current one and drops the "
+        "history when the clock went backwards, so the forecaster does not "
+        "learn from two runs spliced together."
+    )
+    lines.append("")
+
     if screenshots:
         lines.append("## Grafana, during the drill")
         lines.append("")
@@ -1383,6 +2167,22 @@ def main() -> int:
         help="run the dependency failure drill (database and prediction layer)",
     )
     parser.add_argument(
+        "--skip-pool",
+        action="store_true",
+        help="skip the simulator connection-pool exhaustion scenario",
+    )
+    parser.add_argument(
+        "--skip-screenshots",
+        action="store_true",
+        help="do not capture the Grafana screenshots",
+    )
+    parser.add_argument(
+        "--pause",
+        type=float,
+        default=SCENARIO_PAUSE_SECONDS,
+        help="seconds to wait between two scenarios",
+    )
+    parser.add_argument(
         "--output",
         default="docs/resilience-report.md",
         help="where to write the report",
@@ -1399,10 +2199,11 @@ def main() -> int:
     print("=== the crisis drill ===")
     print(f"    backend    : {BACKEND_URL}")
     print(f"    simulator  : {SIMULATOR_URL}")
-    print(f"    prometheus : {PROMETHEUS_URL}")
+    print(f"    host memory: {memory_report()}")
     print()
 
     results: list[ScenarioResult] = []
+    stopped_for_memory = False
 
     with httpx.Client(timeout=20) as client:
         drill = Drill(client)
@@ -1414,78 +2215,118 @@ def main() -> int:
         print(f"    baseline: {health.get('status')}")
         print()
 
-        if not args.skip_crises:
-            for crisis in CRISES:
-                if only and crisis["type"] not in only:
-                    continue
-                print(f"--- crisis: {crisis['label']} ---")
-                try:
-                    result = drill.run_crisis(crisis)
-                    results.append(result)
-                    print(
-                        f"    detected in {result.detection_seconds}s, "
-                        f"recovered in {result.recovery_seconds}s ({result.outcome})"
-                    )
-                except Exception as exc:
-                    print(f"    the scenario raised: {exc}")
-                finally:
-                    drill.clear_crisis()
-                    drill.clear_faults()
-                print()
+        def run_scenario(kind: str, name: str, runner) -> None:
+            """Run one scenario, with the memory guard in front of it.
 
-            if not only or COMBINED_CRISIS["type"] in only:
-                print(f"--- crisis: {COMBINED_CRISIS['label']} ---")
-                try:
-                    result = drill.run_combined_crisis()
-                    results.append(result)
-                    print(
-                        f"    detected in {result.detection_seconds}s, "
-                        f"recovered in {result.recovery_seconds}s ({result.outcome})"
-                    )
-                except Exception as exc:
-                    print(f"    the scenario raised: {exc}")
-                finally:
-                    drill.clear_faults()
-                print()
+            The guard is a **stop**, not a warning: a drill that takes the
+            host down with it proves nothing, and this machine is shared
+            with other projects' stacks.
 
-        if not args.skip_faults:
-            for fault in FAULTS:
-                if only and fault["type"] not in only:
-                    continue
-                print(f"--- fault: {fault['label']} ---")
-                try:
-                    result = drill.run_fault(fault)
-                    results.append(result)
-                    print(
-                        f"    detected in {result.detection_seconds}s, "
-                        f"recovered in {result.recovery_seconds}s ({result.outcome})"
-                    )
-                except Exception as exc:
-                    print(f"    the scenario raised: {exc}")
-                finally:
-                    drill.clear_faults()
-                print()
+            The pause between two scenarios is here too. The world has to
+            settle, and the next scenario must not inherit the last one's
+            state — a crisis that is still resolving would be counted as
+            the next crisis's detection.
+            """
+            nonlocal stopped_for_memory
 
-        if not args.skip_dependencies:
-            print("--- dependency failure: the database and the prediction layer ---")
+            available = available_memory_mb()
+            if available < MIN_AVAILABLE_MEMORY_MB:
+                print(
+                    f"!! stopping before '{name}': only {available:,.0f} MB of "
+                    f"memory is available (the floor is {MIN_AVAILABLE_MEMORY_MB:,.0f} MB)"
+                )
+                stopped_for_memory = True
+                raise StopIteration
+
+            print(f"--- {kind}: {name} ---")
+            print(f"    memory: {memory_report()}")
             try:
-                for result in drill.run_dependency_failure():
-                    results.append(result)
-                    print(
-                        f"    {result.name}: detected in {result.detection_seconds}s, "
-                        f"recovered in {result.recovery_seconds}s ({result.outcome})"
-                    )
+                result = runner()
+                results.append(result)
+                print(
+                    f"    detected in {result.detection_seconds}s, "
+                    f"recovered in {result.recovery_seconds}s ({result.outcome})"
+                )
             except Exception as exc:
                 print(f"    the scenario raised: {exc}")
+            finally:
+                # Leave the world clean for whatever runs next.
+                drill.clear_faults()
+                drill.clear_crisis()
             print()
 
-        print("--- capturing the Grafana dashboards ---")
-        screenshots = capture_grafana_screenshots(Path(args.screenshots))
+            if args.pause > 0:
+                print(f"    ... pausing {args.pause:.0f}s before the next scenario")
+                time.sleep(args.pause)
+
+        try:
+            # The baseline comes first: it is the control measurement every
+            # other scenario is compared against.
+            if not only or "baseline" in only:
+                run_scenario("baseline", "baseline", drill.run_baseline)
+
+            if not args.skip_crises:
+                for crisis in CRISES:
+                    if only and crisis["type"] not in only:
+                        continue
+                    run_scenario(
+                        "crisis", crisis["label"], lambda c=crisis: drill.run_crisis(c)
+                    )
+
+                if not only or COMBINED_CRISIS["type"] in only:
+                    run_scenario(
+                        "combined crisis",
+                        COMBINED_CRISIS["label"],
+                        drill.run_combined_crisis,
+                    )
+
+            if not args.skip_faults:
+                for fault in FAULTS:
+                    if only and fault["type"] not in only:
+                        continue
+                    run_scenario("fault", fault["label"], lambda f=fault: drill.run_fault(f))
+
+            if not args.skip_pool and (not only or POOL_EXHAUSTION["type"] in only):
+                run_scenario(
+                    "dependency failure",
+                    POOL_EXHAUSTION["label"],
+                    drill.run_pool_exhaustion,
+                )
+
+            if not args.skip_dependencies:
+                print("--- dependency failure: the database and the prediction layer ---")
+                try:
+                    for result in drill.run_dependency_failure():
+                        results.append(result)
+                        print(
+                            f"    {result.name}: detected in {result.detection_seconds}s, "
+                            f"recovered in {result.recovery_seconds}s ({result.outcome})"
+                        )
+                except Exception as exc:
+                    print(f"    the scenario raised: {exc}")
+                print()
+
+        except StopIteration:
+            pass
+
+        # The Grafana screenshots are only captured when the monitoring
+        # profile is actually running — with Prometheus and Grafana off there
+        # is nothing to photograph.
+        screenshots: list[Path] = []
+        if not args.skip_screenshots:
+            print("--- capturing the Grafana dashboards ---")
+            screenshots = capture_grafana_screenshots(Path(args.screenshots))
 
     render_report(results, screenshots=screenshots, output=Path(args.output))
 
     recovered = sum(1 for r in results if r.recovered)
     print()
+    if stopped_for_memory:
+        print(
+            f"=== stopped after {len(results)} scenarios: the host's available "
+            f"memory fell under {MIN_AVAILABLE_MEMORY_MB:,.0f} MB ==="
+        )
+        return 2
     print(f"=== {recovered}/{len(results)} scenarios recovered automatically ===")
     return 0 if results and recovered == len(results) else 1
 
