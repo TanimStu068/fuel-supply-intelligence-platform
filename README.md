@@ -279,6 +279,12 @@ docker compose up -d --wait                                       # the platform
 docker compose --profile core --profile monitoring up -d --wait   # + Prometheus, Grafana, node-exporter
 ```
 
+To start monitoring alongside the default core profile explicitly:
+
+```bash
+docker compose --profile monitoring up -d --wait
+```
+
 The whole stack is capped at **1.5 GB** of memory in total, and measures
 **~417 MB** in use. `COMPOSE_PROFILES=core` lives in `.env`, so a plain
 `docker compose up` starts the platform alone.

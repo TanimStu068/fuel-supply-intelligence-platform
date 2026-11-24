@@ -996,7 +996,84 @@ explicitly rather than conflated.
 
 ---
 
+# Part 3 — Load testing, searchable logs, and Grafana evidence
+
+**Date:** Day 6 of 7, Part 3 of 3 · BUP CSE Fest 2026 Hackathon Finals
+
+## Load-test run and safety stop
+
+The host-side `asyncio`/`httpx` runner is in
+[`scripts/loadtest/async_loadtest.py`](../../scripts/loadtest/async_loadtest.py).
+It targets only the core profile, runs 5 → 20 → 50 virtual users for 30 s
+per stage, samples backend CPU/memory using `docker stats`, checks `free -h`
+before every scenario, and stops on sustained CPU above 90%, errors above
+20%, or available memory below 1 GiB.
+
+| Workload | Result |
+|---|---|
+| Dashboard API | Began at 5 users; safety-stopped after 9.1 s when 3 consecutive CPU samples exceeded 90% of the backend's 1-core quota |
+| Recommendation API | Not run; the sequence stops after a safety limit |
+| End-to-end decision | Not run; the sequence stops after a safety limit |
+
+The partial dashboard run completed **4,785 requests** at **526.79 req/s**,
+with **9.48 ms average**, **6.32 ms p50**, **16.48 ms p95**, **73.14 ms p99**
+and **0.00% errors**. `docker stats` measured CPU at **98.81%, 101.05% and
+100.01%** of quota across the three consecutive samples, with **111.7 MiB**
+peak backend memory. The pre-scenario `free -h` reading showed **3,470 MiB
+available**. The backend remained healthy after the workers stopped and
+returned to **0.57% CPU**.
+
+The result is a system limit at this unpaced dashboard workload. Since the
+guard was reached, the remaining two workloads were not run; this is a
+safety stop, not a pass for those paths. Raw measurements and the historical
+before/after bottleneck fix are in
+[`docs/load-test-report.md`](../load-test-report.md) and
+[`scripts/loadtest/results/part3-async.json`](../../scripts/loadtest/results/part3-async.json).
+
+## Searchable audit and structured logs
+
+[`scripts/search_logs.py`](../../scripts/search_logs.py) now supports combined
+filters for correlation ID, level, structured event type, and inclusive
+`--since` / `--until` timestamps. The unified `GET /api/audit` endpoint
+continues to filter decisions, events and alerts by source, kind, status and
+time range.
+
+Example:
+
+```bash
+scripts/search_logs.py --tail 300 --correlation sse-4a8a78f11dd3 \
+  --level INFO --event-type simulation.tick \
+  --since 2026-11-24T20:21:45Z --until 2026-11-24T20:21:46Z --json
+```
+
+The combined audit API query with a two-day time range did not return within
+10 seconds. In accordance with the operating rule, I ran `docker compose down`
+and did not restart the stack. The live audit query, Grafana captures, and
+core-plus-monitoring memory measurement are therefore **not verified**.
+
+## Grafana capture and final resource measurements
+
+The capture script was updated to launch and close a headless browser for each
+of the four dashboards, but no screenshots were captured: the API timeout
+triggered the required shutdown before the monitoring-profile step.
+[`README.md`](../../README.md) documents
+`docker compose --profile monitoring up -d --wait`.
+
+| Profile/state | Measured memory |
+|---|---:|
+| Core after startup, before load | **258.6 MiB** total (`docker stats`; 4 containers) |
+| Core plus monitoring | Not measured; the stack was stopped after the audit timeout |
+| After `docker compose down` | No project containers running |
+
+After shutdown, `docker system prune -f` reported **0 B** reclaimed.
+`free -h` reported **3.8 GiB available**; `df -h .` reported **321 GB used,
+124 GB available (73%)**.
+
+---
+
 Next — Day 7
 
-Polish, the final read-me and the demo script. The platform is stable and
-measured; what remains is making it easy to *show*.
+Polish, the final read-me and the demo script. Part 3 still needs the two
+unrun load paths, a verified audit API response, the four Grafana screenshots,
+and the core-plus-monitoring memory measurement after the audit timeout is
+resolved and the stack can safely be restarted.
