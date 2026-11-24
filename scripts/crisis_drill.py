@@ -541,12 +541,8 @@ class Drill:
 
         # Let the crisis run so the platform has time to act on it.
         time.sleep(10)
-        result.observations.append(
-            Observation("risk during crisis", self._risk_summary())
-        )
-        result.observations.append(
-            Observation("alerts during crisis", self._alert_summary())
-        )
+        result.observations.append(Observation("risk during crisis", self._risk_summary()))
+        result.observations.append(Observation("alerts during crisis", self._alert_summary()))
 
         # The crisis resolves itself when its ticks run out — the simulator
         # has no "end this event" call. The recovery clock therefore starts
@@ -661,12 +657,8 @@ class Drill:
 
         result.served_during_incident = self._check_serving()
         result.recommendation = self._summarise_recommendations(result.started_at)
-        result.observations.append(
-            Observation("breaker state", self._breaker_state())
-        )
-        result.observations.append(
-            Observation("degraded mode", self._degraded_mode())
-        )
+        result.observations.append(Observation("breaker state", self._breaker_state()))
+        result.observations.append(Observation("degraded mode", self._degraded_mode()))
 
         # Clear the fault and wait for the platform to come back.
         self.clear_faults()
@@ -755,12 +747,8 @@ class Drill:
         # While the compound crisis is live, the dashboard must still answer.
         result.served_during_incident = self._check_serving()
         result.recommendation = self._summarise_recommendations(result.started_at)
-        result.observations.append(
-            Observation("risk during crisis", self._risk_summary())
-        )
-        result.observations.append(
-            Observation("alerts during crisis", self._alert_summary())
-        )
+        result.observations.append(Observation("risk during crisis", self._risk_summary()))
+        result.observations.append(Observation("alerts during crisis", self._alert_summary()))
 
         # Let the crisis run, then wait for it to resolve.
         time.sleep(15)
@@ -971,7 +959,10 @@ class Drill:
             Observation(
                 "simulator component",
                 str(
-                    self.service_health().get("components", {}).get("simulator", {}).get("status", "—")
+                    self.service_health()
+                    .get("components", {})
+                    .get("simulator", {})
+                    .get("status", "—")
                 ),
             )
         )
@@ -982,9 +973,7 @@ class Drill:
             )
         )
         if not degraded:
-            result.notes.append(
-                "the platform did not go degraded — it kept serving a fresh world"
-            )
+            result.notes.append("the platform did not go degraded — it kept serving a fresh world")
 
         # Recovery: the burst's threads finish, the pool drains, and the
         # platform's next successful sync clears the degraded flag.
@@ -1242,12 +1231,7 @@ class Drill:
         database.observations.append(
             Observation(
                 "database component during the outage",
-                str(
-                    self.health()
-                    .get("components", {})
-                    .get("database", {})
-                    .get("status", "—")
-                ),
+                str(self.health().get("components", {}).get("database", {}).get("status", "—")),
             )
         )
         database.observations.append(
@@ -1258,8 +1242,7 @@ class Drill:
         )
 
         detected, elapsed = self.wait_for(
-            lambda: self.health().get("components", {}).get("database", {}).get("status")
-            != "ok",
+            lambda: self.health().get("components", {}).get("database", {}).get("status") != "ok",
             timeout=45,
         )
         database.detection_seconds = round(elapsed, 1)
@@ -1272,8 +1255,7 @@ class Drill:
         print("    restarting the database...")
         self._compose("start", "postgres")
         recovered, elapsed = self.wait_for(
-            lambda: self.health().get("components", {}).get("database", {}).get("status")
-            == "ok",
+            lambda: self.health().get("components", {}).get("database", {}).get("status") == "ok",
             timeout=120,
         )
         database.recovery_seconds = round(elapsed, 1)
@@ -1315,19 +1297,13 @@ class Drill:
             Observation("baseline status", self.health().get("status", "unknown"))
         )
         prediction.observations.append(
-            Observation(
-                "active model before", self._model_status().get("active_model", "unknown")
-            )
+            Observation("active model before", self._model_status().get("active_model", "unknown"))
         )
-        prediction.observations.append(
-            Observation("the forecast before", self._forecast_summary())
-        )
+        prediction.observations.append(Observation("the forecast before", self._forecast_summary()))
 
         print("    turning the ML kill-switch on...")
         turned_on = self._kill_switch(True)
-        prediction.observations.append(
-            Observation("kill-switch accepted", turned_on)
-        )
+        prediction.observations.append(Observation("kill-switch accepted", turned_on))
         time.sleep(12)
 
         model_status = self._model_status()
@@ -1351,8 +1327,10 @@ class Drill:
         prediction.observations.append(
             Observation(
                 "kill-switch activations",
-                f"on: {self._backend_counter('ml_kill_switch_activations_total', 'enabled', 'true')}, "
-                f"off: {self._backend_counter('ml_kill_switch_activations_total', 'enabled', 'false')}",
+                "on: "
+                f"{self._backend_counter('ml_kill_switch_activations_total', 'enabled', 'true')}, "
+                "off: "
+                f"{self._backend_counter('ml_kill_switch_activations_total', 'enabled', 'false')}",
             )
         )
         prediction.observations.append(
@@ -1415,24 +1393,18 @@ class Drill:
         # injecting a fault into it would measure nothing. The drill
         # trains it first, and only then breaks it.
         trained = self._train_model()
-        broken.observations.append(
-            Observation("the learned model was trained", trained)
-        )
+        broken.observations.append(Observation("the learned model was trained", trained))
         broken.observations.append(
             Observation(
                 "active model before",
                 self._model_status().get("active_model", "unknown"),
             )
         )
-        broken.observations.append(
-            Observation("the forecast before", self._forecast_summary())
-        )
+        broken.observations.append(Observation("the forecast before", self._forecast_summary()))
 
         print("    breaking the learned model...")
         injected = self._inject_prediction_fault("predict_error")
-        broken.observations.append(
-            Observation("the fault was accepted", injected)
-        )
+        broken.observations.append(Observation("the fault was accepted", injected))
         time.sleep(12)
 
         broken.observations.append(
@@ -1653,9 +1625,7 @@ class Drill:
                 return True
             if crisis_type == "depot_constraint" and entity.get("status") == "CONSTRAINED":
                 return True
-            if crisis_type == "demand_spike" and float(
-                entity.get("demand_multiplier", 1.0)
-            ) > 1.0:
+            if crisis_type == "demand_spike" and float(entity.get("demand_multiplier", 1.0)) > 1.0:
                 # The spike shows up as a raised demand multiplier.
                 return True
             if crisis_type in {"shipment_delay", "supply_shortfall"}:
@@ -1737,9 +1707,7 @@ class Drill:
             "fault_injected": self._backend_counter(
                 "simulator_requests_total", "outcome", "fault_injected"
             ),
-            "timeout": self._backend_counter(
-                "simulator_requests_total", "outcome", "timeout"
-            ),
+            "timeout": self._backend_counter("simulator_requests_total", "outcome", "timeout"),
             "sse_reconnects": self._backend_counter("sse_reconnects_total"),
             "sse_connections": self._backend_counter("sse_connections_total"),
         }
@@ -1949,24 +1917,15 @@ class Drill:
             return "no recommendations were proposed"
 
         # Only the proposals made during this scenario.
-        during = [
-            item
-            for item in items
-            if self._proposed_since(item, since)
-        ]
+        during = [item for item in items if self._proposed_since(item, since)]
         if not during:
-            return (
-                f"no new proposals during the incident "
-                f"({len(items)} already in the store)"
-            )
+            return f"no new proposals during the incident ({len(items)} already in the store)"
 
         by_level: dict[str, int] = {}
         for item in during:
             level = str(item.get("risk_level", "UNKNOWN")).upper()
             by_level[level] = by_level.get(level, 0) + 1
-        levels = ", ".join(
-            f"{level}={count}" for level, count in sorted(by_level.items())
-        )
+        levels = ", ".join(f"{level}={count}" for level, count in sorted(by_level.items()))
 
         fallback = sum(1 for item in during if item.get("used_fallback_policy"))
         # The most urgent proposal, not the newest one: the store is sorted
@@ -2106,8 +2065,6 @@ def capture_grafana_screenshots(output_dir: Path) -> list[Path]:
     return sorted(output_dir.glob("grafana-*.png"))
 
 
-
-
 def render_report(
     results: list[ScenarioResult],
     *,
@@ -2152,8 +2109,7 @@ def render_report(
     lines.append("## Summary")
     lines.append("")
     lines.append(
-        "| Scenario | Kind | Detected in | Recovery | Outcome | "
-        "Served during the incident |"
+        "| Scenario | Kind | Detected in | Recovery | Outcome | Served during the incident |"
     )
     lines.append("|---|---|---|---|---|---|")
     for result in results:
@@ -2362,8 +2318,22 @@ def main() -> int:
 
             print(f"--- {kind}: {name} ---")
             print(f"    memory: {memory_report()}")
+            # Every scenario carries the host's available memory, so the
+            # report proves the drill stayed inside its memory contract
+            # instead of asserting it.
+            memory_before = memory_report()
             try:
                 result = runner()
+                # The memory reading belongs to the scenario, not to the
+                # loop, so it is recorded even if the scenario raises.
+                already_recorded = any(
+                    observation.name == "memory before the scenario"
+                    for observation in result.observations
+                )
+                if not already_recorded:
+                    result.observations.append(
+                        Observation("memory before the scenario", memory_before)
+                    )
                 results.append(result)
                 print(
                     f"    detected in {result.detection_seconds}s, "
@@ -2391,9 +2361,7 @@ def main() -> int:
                 for crisis in CRISES:
                     if only and crisis["type"] not in only:
                         continue
-                    run_scenario(
-                        "crisis", crisis["label"], lambda c=crisis: drill.run_crisis(c)
-                    )
+                    run_scenario("crisis", crisis["label"], lambda c=crisis: drill.run_crisis(c))
 
                 if not only or COMBINED_CRISIS["type"] in only:
                     run_scenario(
