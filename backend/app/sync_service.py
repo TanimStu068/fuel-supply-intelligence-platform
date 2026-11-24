@@ -46,6 +46,7 @@ from .metrics import (
     STALE_DATA,
     SYNC_CYCLE_DURATION,
     SYNC_CYCLES,
+    SYNC_CYCLES_COALESCED,
 )
 from .repository import (
     max_demand_tick,
@@ -60,6 +61,7 @@ from .repository import (
 )
 from .simulator_client import SimulatorClient
 from .simulator_errors import (
+    FaultInjectedError,
     SimulatorAPIError,
     SimulatorConnectionError,
     SimulatorTimeoutError,
@@ -93,6 +95,21 @@ class SyncService:
         #: Set by the SSE loop so the poller can shorten its interval when
         #: something just changed.
         self._dirty = asyncio.Event()
+        #: The lock that serialises sync cycles. Only one cycle may run at
+        #: a time: two overlapping cycles would double the load on the
+        #: simulator for no benefit, because the second one reads the same
+        #: world the first one is already reading.
+        self._sync_lock = asyncio.Lock()
+        #: How many sync requests have been made. A cycle settles every
+        #: request that was outstanding when it started.
+        self._sync_requests = 0
+        #: The highest request number a completed cycle has settled.
+        self._sync_completed = 0
+        #: Set by the worker when it has settled the pending requests.
+        self._sync_settled = asyncio.Event()
+        #: The worker task that does the reading, so a burst of requests
+        #: collapses into one cycle rather than one cycle each.
+        self._sync_worker: asyncio.Task[None] | None = None
 
     # -- lifecycle ---------------------------------------------------------
 
@@ -127,7 +144,11 @@ class SyncService:
         first scheduled tick.
         """
         while not self._stopping.is_set():
-            await self.run_sync_cycle()
+            # The poller goes through the same coalescing path as the SSE
+            # listener, so a poll cycle and an event-driven cycle can never
+            # overlap. Two overlapping cycles would double the load on the
+            # simulator for no benefit.
+            await self._request_sync()
             try:
                 await asyncio.wait_for(self._stopping.wait(), timeout=self._poll_interval())
             except TimeoutError:
@@ -170,6 +191,28 @@ class SyncService:
             SYNC_CYCLES.labels(outcome="invalid").inc()
             SYNC_CYCLE_DURATION.observe(time.perf_counter() - started)
             return False
+        except FaultInjectedError as exc:
+            # The simulator is deliberately misbehaving — a fault was
+            # injected into it. It is not the same as the dependency
+            # being broken, so it does not trip the circuit breaker, but
+            # the platform must not pretend the data it is holding is
+            # current: the sync did not reach the world, so the cached
+            # state is served *degraded*, with its age, exactly as it
+            # would be if the simulator had vanished.
+            #
+            # Without this, the sync cycle falls through to the generic
+            # ``SimulatorAPIError`` branch, which records a health row
+            # but leaves the cache looking fresh — so the dashboard
+            # shows live-looking numbers that are minutes old and
+            # nothing anywhere says so.
+            logger.warning(
+                "sync cycle hit an injected simulator fault; serving last-known state",
+                extra={"correlation_id": correlation_id, "error": str(exc)},
+            )
+            await self._handle_simulator_unreachable(str(exc), correlation_id)
+            SYNC_CYCLES.labels(outcome="faulted").inc()
+            SYNC_CYCLE_DURATION.observe(time.perf_counter() - started)
+            return False
         except SimulatorAPIError as exc:
             logger.error(
                 "sync cycle failed with a simulator error",
@@ -197,10 +240,26 @@ class SyncService:
             self._cache.invalidate()
 
         self._cache.store(snapshot)
+
+        # Each step of the cycle is timed separately. The whole cycle's
+        # duration is dominated by one step, and without this split there
+        # is no way to tell which one — the cycle is simply "slow".
+        step_started = time.perf_counter()
         await self._persist(snapshot, correlation_id)
+        persist_seconds = time.perf_counter() - step_started
+
+        step_started = time.perf_counter()
         await self._ingest_demand_history(correlation_id)
+        history_seconds = time.perf_counter() - step_started
+
+        step_started = time.perf_counter()
         await self._raise_alerts(snapshot, correlation_id)
+        alerts_seconds = time.perf_counter() - step_started
+
+        step_started = time.perf_counter()
         await self._evaluate_intelligence(correlation_id)
+        intelligence_seconds = time.perf_counter() - step_started
+
         age = self._cache.last_sync_age() or 0.0
         LAST_SYNC_AGE.set(age)
         STALE_DATA.set(1 if stale else 0)
@@ -215,6 +274,10 @@ class SyncService:
                 "sim_tick": snapshot.instance.tick,
                 "stale": stale,
                 "duration_seconds": round(time.perf_counter() - started, 4),
+                "persist_seconds": round(persist_seconds, 4),
+                "history_seconds": round(history_seconds, 4),
+                "alerts_seconds": round(alerts_seconds, 4),
+                "intelligence_seconds": round(intelligence_seconds, 4),
             },
         )
         return True
@@ -272,48 +335,58 @@ class SyncService:
         await self._write_health("simulator", "unreachable", reason, correlation_id)
 
     async def _persist(self, snapshot: CachedState, correlation_id: str) -> None:
-        """Mirror the snapshot into Postgres. Never raises."""
+        """Mirror the snapshot into Postgres. Never raises.
+
+        This goes through the retrying write helper: it writes the
+        allocation ledger and the domain events while an operator may be
+        approving a recommendation at the same time, and that pair
+        deadlocks on the allocation rows. Postgres kills one side of a
+        deadlock with ``40001``, which the SQL standard says the
+        application should retry.
+        """
+
+        async def work(session) -> None:
+            await write_state_snapshot(
+                session,
+                sim_tick=snapshot.instance.tick,
+                sim_time=snapshot.instance.sim_time,
+                sim_status=snapshot.instance.status.value,
+                scenario_id=snapshot.instance.scenario_id,
+                metrics=snapshot.metrics,
+                stale=snapshot.stale,
+                payload={
+                    "stations": len(snapshot.stations),
+                    "depots": len(snapshot.depots),
+                    "routes": len(snapshot.routes),
+                    "events": len(snapshot.events),
+                    "allocations": len(snapshot.allocations),
+                },
+            )
+            await write_inventory_snapshots(
+                session,
+                sim_tick=snapshot.instance.tick,
+                sim_time=snapshot.instance.sim_time,
+                stations=snapshot.stations,
+                depots=snapshot.depots,
+            )
+            await write_allocations(session, snapshot.allocations)
+            await write_domain_events(session, snapshot.events)
+            await write_system_health(
+                session,
+                component="simulator",
+                status="stale" if snapshot.stale else "ok",
+                detail=None if not snapshot.stale else "X-Simulator-Stale header present",
+                correlation_id=correlation_id,
+            )
+            await write_system_health(
+                session,
+                component="backend",
+                status="ok",
+                correlation_id=correlation_id,
+            )
+
         try:
-            async with self._database.session() as session:
-                await write_state_snapshot(
-                    session,
-                    sim_tick=snapshot.instance.tick,
-                    sim_time=snapshot.instance.sim_time,
-                    sim_status=snapshot.instance.status.value,
-                    scenario_id=snapshot.instance.scenario_id,
-                    metrics=snapshot.metrics,
-                    stale=snapshot.stale,
-                    payload={
-                        "stations": len(snapshot.stations),
-                        "depots": len(snapshot.depots),
-                        "routes": len(snapshot.routes),
-                        "events": len(snapshot.events),
-                        "allocations": len(snapshot.allocations),
-                    },
-                )
-                await write_inventory_snapshots(
-                    session,
-                    sim_tick=snapshot.instance.tick,
-                    sim_time=snapshot.instance.sim_time,
-                    stations=snapshot.stations,
-                    depots=snapshot.depots,
-                )
-                await write_allocations(session, snapshot.allocations)
-                await write_domain_events(session, snapshot.events)
-                await write_system_health(
-                    session,
-                    component="simulator",
-                    status="stale" if snapshot.stale else "ok",
-                    detail=None if not snapshot.stale else "X-Simulator-Stale header present",
-                    correlation_id=correlation_id,
-                )
-                await write_system_health(
-                    session,
-                    component="backend",
-                    status="ok",
-                    correlation_id=correlation_id,
-                )
-                await session.commit()
+            await self._database.write(work)
         except Exception as exc:
             logger.warning(
                 "could not persist snapshot to postgres",
@@ -424,6 +497,64 @@ class SyncService:
         ceiling = min(base * (2 ** min(attempt - 1, 6)), self._settings.sse_reconnect_max_delay)
         return max(0.1, random.uniform(0, ceiling))
 
+    async def _request_sync(self) -> None:
+        """Ask for a sync, collapsing a burst of requests into one cycle.
+
+        **Why this exists.** The simulator publishes a ``simulation.tick``
+        event several times a second. The first version of the SSE handler
+        ran a *full* sync cycle on every one of them, and a full cycle reads
+        nine endpoints. At eight ticks a second that is roughly seventy
+        requests a second against a simulator whose database pool holds
+        fifteen connections — so the platform's own event stream exhausted
+        the simulator's pool and took it down.
+
+        **How the collapsing works.** A single background *worker* task does
+        the reading. Callers only raise a counter and wait. The worker takes
+        the counter's value when it starts a cycle, and that cycle settles
+        every request outstanding at that moment. The requests that arrive
+        *during* the cycle are settled by the next one — so a burst of ten
+        ticks produces one cycle, and a burst that keeps arriving produces
+        one cycle at a time, never a queue of them.
+
+        The result is that the simulator sees at most one cycle in flight
+        and one pending, whatever the tick rate.
+        """
+        self._sync_requests += 1
+        my_generation = self._sync_requests
+
+        while self._sync_completed < my_generation:
+            # Clear before starting the worker, so a worker that finishes
+            # immediately cannot set the flag before we wait on it.
+            self._sync_settled.clear()
+            if self._sync_worker is None or self._sync_worker.done():
+                self._sync_worker = asyncio.create_task(
+                    self._sync_worker_loop(), name="sync-worker"
+                )
+            await self._sync_settled.wait()
+
+    async def _sync_worker_loop(self) -> None:
+        """Read the world until no further sync is wanted."""
+        # One turn of the event loop first, so every request that is
+        # already pending registers before the first cycle starts. This is
+        # what turns "ten ticks at once" into one cycle rather than two.
+        await asyncio.sleep(0)
+
+        while not self._stopping.is_set():
+            # Everything requested up to this moment is settled by the
+            # cycle we are about to run.
+            target = self._sync_requests
+            await self.run_sync_cycle()
+            self._sync_completed = max(self._sync_completed, target)
+            self._sync_settled.set()
+
+            # If nothing arrived while we were reading, we are done.
+            if self._sync_requests <= target:
+                return
+
+            # Requests that arrived *during* the cycle were collapsed into
+            # the next one instead of each getting their own.
+            SYNC_CYCLES_COALESCED.inc(self._sync_requests - target)
+
     async def _handle_event(self, event: StreamEvent) -> None:
         """React to an SSE event by re-reading the affected resource.
 
@@ -433,7 +564,7 @@ class SyncService:
         """
         try:
             if event.is_tick:
-                await self.run_sync_cycle()
+                await self._request_sync()
                 return
 
             if event.is_allocation:
@@ -447,7 +578,7 @@ class SyncService:
             if event.is_notice:
                 # A notice means the simulator itself did something (a reset,
                 # or a background-runner exception). Re-read the whole world.
-                await self.run_sync_cycle()
+                await self._request_sync()
         except SimulatorAPIError as exc:
             logger.warning(
                 "could not refresh after an sse event",
@@ -460,12 +591,19 @@ class SyncService:
             )
 
     async def _refresh_allocations(self) -> None:
-        """Re-read the allocation ledger and mirror it."""
+        """Re-read the allocation ledger and mirror it.
+
+        This goes through the retrying write helper: it writes the same
+        allocation rows an approving operator is writing, so the two
+        deadlock on each other under load.
+        """
         allocations = await self._client.get_allocations()
+
+        async def work(session) -> None:
+            await write_allocations(session, allocations)
+
         try:
-            async with self._database.session() as session:
-                await write_allocations(session, allocations)
-                await session.commit()
+            await self._database.write(work)
         except Exception as exc:
             logger.warning("could not persist allocations", extra={"error": str(exc)})
 
@@ -769,31 +907,33 @@ class SyncService:
             return
 
         tick = snapshot.instance.tick
-        try:
-            async with self._database.session() as session:
-                for kind, severity, entity_type, entity_id, payload in candidates:
-                    created = await write_alert(
-                        session,
-                        kind=kind,
-                        severity=severity,
-                        entity_type=entity_type,
-                        entity_id=entity_id,
-                        sim_tick=tick,
-                        message=f"{entity_type} {entity_id} reported {kind}",
-                        payload=payload,
+
+        async def work(session) -> None:
+            for kind, severity, entity_type, entity_id, payload in candidates:
+                created = await write_alert(
+                    session,
+                    kind=kind,
+                    severity=severity,
+                    entity_type=entity_type,
+                    entity_id=entity_id,
+                    sim_tick=tick,
+                    message=f"{entity_type} {entity_id} reported {kind}",
+                    payload=payload,
+                )
+                if created:
+                    logger.warning(
+                        "alert raised",
+                        extra={
+                            "correlation_id": correlation_id,
+                            "kind": kind,
+                            "severity": severity,
+                            "entity_id": entity_id,
+                            "sim_tick": tick,
+                        },
                     )
-                    if created:
-                        logger.warning(
-                            "alert raised",
-                            extra={
-                                "correlation_id": correlation_id,
-                                "kind": kind,
-                                "severity": severity,
-                                "entity_id": entity_id,
-                                "sim_tick": tick,
-                            },
-                        )
-                await session.commit()
+
+        try:
+            await self._database.write(work)
         except Exception as exc:
             logger.warning(
                 "could not write alerts",

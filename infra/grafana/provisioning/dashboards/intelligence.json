@@ -1,0 +1,190 @@
+{
+  "uid": "fuel-intelligence",
+  "title": "Intelligence",
+  "tags": ["fuel", "intelligence"],
+  "timezone": "utc",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "10s",
+  "editable": true,
+  "time": {"from": "now-1h", "to": "now"},
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Prediction error (MAE)",
+      "description": "Mean absolute error of the demand forecast in litres, by model. This is the number that says whether the model is any good.",
+      "gridPos": {"h": 5, "w": 6, "x": 0, "y": 0},
+      "targets": [
+        {"expr": "prediction_error_mae_liters{model=\"learned\"}", "legendFormat": "learned", "refId": "A"},
+        {"expr": "prediction_error_mae_liters{model=\"baseline\"}", "legendFormat": "baseline", "refId": "B"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "litre", "decimals": 2}}
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Model confidence",
+      "description": "The mean confidence of the forecasts the active model produced.",
+      "gridPos": {"h": 5, "w": 6, "x": 6, "y": 0},
+      "targets": [{"expr": "model_confidence", "legendFormat": "{{model}}", "refId": "A"}],
+      "fieldConfig": {"defaults": {"min": 0, "max": 1, "decimals": 3}}
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Interval coverage",
+      "description": "How often the actual demand fell inside the forecast's confidence band. Below 80% means the band is too narrow.",
+      "gridPos": {"h": 5, "w": 6, "x": 12, "y": 0},
+      "targets": [{"expr": "prediction_interval_coverage_ratio", "legendFormat": "{{model}}", "refId": "A"}],
+      "fieldConfig": {"defaults": {"unit": "percentunit", "min": 0, "max": 1}}
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "ML kill-switch",
+      "description": "1 while an operator has switched the learned model off.",
+      "gridPos": {"h": 5, "w": 6, "x": 18, "y": 0},
+      "targets": [{"expr": "ml_model_disabled", "refId": "A"}],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {"type": "value", "options": {"0": {"text": "MODEL ON", "color": "green"}, "1": {"text": "MODEL OFF", "color": "red"}}}
+          ]
+        }
+      }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Prediction error by model",
+      "description": "The learned model against the rule-based baseline. The gap between the two lines is the value the model adds.",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 5},
+      "targets": [
+        {"expr": "prediction_error_mae_liters", "legendFormat": "{{model}}", "refId": "A"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "litre"}}
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Forecasts produced",
+      "description": "Forecasts per second, by the model that produced them.",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 5},
+      "targets": [
+        {"expr": "sum by (model) (rate(forecasts_produced_total[1m]))", "legendFormat": "{{model}}", "refId": "A"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "ops"}}
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Risk assessments by level",
+      "description": "How many station-fuel pairs landed in each risk band per second.",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 13},
+      "targets": [
+        {"expr": "sum by (level) (rate(risk_assessments_total[1m]))", "legendFormat": "{{level}}", "refId": "A"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "ops"}}
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Alert rate",
+      "description": "Anomalies and bottlenecks detected per second, by kind.",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 13},
+      "targets": [
+        {
+          "expr": "sum by (kind) (rate(anomalies_detected_total[1m]))",
+          "legendFormat": "anomaly · {{kind}}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum by (kind) (rate(bottlenecks_detected_total[1m]))",
+          "legendFormat": "bottleneck · {{kind}}",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {"defaults": {"unit": "ops"}}
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "Fallback activations",
+      "description": "Times the prediction layer fell back to the rule-based predictor. A rising line means the model is not being trusted.",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 21},
+      "targets": [
+        {
+          "expr": "sum by (reason) (rate(fallback_activations_total[5m]))",
+          "legendFormat": "{{reason}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {"defaults": {"unit": "ops"}}
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Human review required",
+      "description": "Forecasts and assessments flagged for a human to look at.",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 21},
+      "targets": [
+        {
+          "expr": "sum by (kind) (rate(needs_human_review_total[1m]))",
+          "legendFormat": "{{kind}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {"defaults": {"unit": "ops"}}
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "Decision rate",
+      "description": "Allocation recommendations proposed per second.",
+      "gridPos": {"h": 7, "w": 12, "x": 0, "y": 29},
+      "targets": [
+        {"expr": "decisions_per_minute / 60", "legendFormat": "proposed", "refId": "A"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "ops"}}
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "Decision outcomes",
+      "description": "Proposals, approvals, rejections and submissions.",
+      "gridPos": {"h": 7, "w": 12, "x": 12, "y": 29},
+      "targets": [
+        {"expr": "decisions_proposed_total", "legendFormat": "proposed", "refId": "A"},
+        {"expr": "decisions_approved_total", "legendFormat": "approved", "refId": "B"},
+        {"expr": "decisions_rejected_total", "legendFormat": "rejected", "refId": "C"},
+        {"expr": "decisions_submitted_total", "legendFormat": "submitted", "refId": "D"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "short"}}
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "Decision fallback policy",
+      "description": "Times the decision engine fell back to the days-of-cover policy because there was no usable forecast.",
+      "gridPos": {"h": 7, "w": 12, "x": 0, "y": 36},
+      "targets": [
+        {
+          "expr": "sum by (reason) (rate(decision_fallback_activations_total[5m]))",
+          "legendFormat": "{{reason}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {"defaults": {"unit": "ops"}}
+    },
+    {
+      "id": 14,
+      "type": "timeseries",
+      "title": "Approval rate",
+      "description": "The share of proposals a human approved.",
+      "gridPos": {"h": 7, "w": 12, "x": 12, "y": 36},
+      "targets": [{"expr": "decision_approval_rate", "legendFormat": "approval rate", "refId": "A"}],
+      "fieldConfig": {"defaults": {"unit": "percentunit", "min": 0, "max": 1}}
+    }
+  ]
+}

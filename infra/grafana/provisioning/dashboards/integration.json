@@ -1,0 +1,232 @@
+{
+  "uid": "fuel-integration",
+  "title": "Integration",
+  "tags": ["fuel", "integration"],
+  "timezone": "utc",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "10s",
+  "editable": true,
+  "time": {"from": "now-1h", "to": "now"},
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Simulator up",
+      "description": "Whether the platform can currently reach the simulator.",
+      "gridPos": {"h": 5, "w": 5, "x": 0, "y": 0},
+      "targets": [{"expr": "1 - degraded_mode", "refId": "A"}],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {"type": "value", "options": {"1": {"text": "UP", "color": "green"}, "0": {"text": "DOWN", "color": "red"}}}
+          ]
+        }
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Simulator failures",
+      "description": "Simulator calls per second that failed, by outcome.",
+      "gridPos": {"h": 5, "w": 5, "x": 5, "y": 0},
+      "targets": [
+        {
+          "expr": "sum(rate(simulator_requests_total{outcome!=\"success\"}[5m]))",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {"defaults": {"unit": "reqps", "decimals": 3}}
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "SSE reconnects",
+      "description": "How often the event stream had to be re-opened.",
+      "gridPos": {"h": 5, "w": 5, "x": 10, "y": 0},
+      "targets": [{"expr": "sum(increase(sse_reconnects_total[15m]))", "refId": "A"}],
+      "fieldConfig": {"defaults": {"unit": "short"}}
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Stale responses",
+      "description": "Simulator responses that carried the stale header.",
+      "gridPos": {"h": 5, "w": 5, "x": 15, "y": 0},
+      "targets": [{"expr": "sum(increase(simulator_stale_responses_total[15m]))", "refId": "A"}],
+      "fieldConfig": {"defaults": {"unit": "short"}}
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Last sync age",
+      "description": "Seconds since the platform last reached the simulator successfully.",
+      "gridPos": {"h": 5, "w": 4, "x": 20, "y": 0},
+      "targets": [{"expr": "last_sync_age_seconds", "refId": "A"}],
+      "fieldConfig": {"defaults": {"unit": "s", "decimals": 1}}
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Simulator calls by outcome",
+      "description": "Success, conflict, fault, error and timeout, per second. The difference between a conflict and an error matters: a conflict is a domain answer, an error is a broken dependency.",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 5},
+      "targets": [
+        {
+          "expr": "sum by (outcome) (rate(simulator_requests_total[1m]))",
+          "legendFormat": "{{outcome}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {"defaults": {"unit": "reqps"}}
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Simulator latency",
+      "description": "p50, p95 and p99 of the platform's calls to the simulator.",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 5},
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(simulator_request_duration_seconds_bucket[1m])))",
+          "legendFormat": "p50",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(simulator_request_duration_seconds_bucket[1m])))",
+          "legendFormat": "p95",
+          "refId": "B"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(simulator_request_duration_seconds_bucket[1m])))",
+          "legendFormat": "p99",
+          "refId": "C"
+        }
+      ],
+      "fieldConfig": {"defaults": {"unit": "s"}}
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "SSE reconnects by reason",
+      "description": "Why the event stream was re-opened: closed by the server, an injected fault, unreachable, or an unexpected error.",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 13},
+      "targets": [
+        {
+          "expr": "sum by (reason) (rate(sse_reconnects_total[1m]))",
+          "legendFormat": "{{reason}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {"defaults": {"unit": "ops"}}
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "SSE events received",
+      "description": "The event stream's throughput, by event type.",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 13},
+      "targets": [
+        {
+          "expr": "sum by (event) (rate(sse_events_total[1m]))",
+          "legendFormat": "{{event}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {"defaults": {"unit": "ops"}}
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Sync cycles by outcome",
+      "description": "Each cycle either succeeded, failed, or was rejected as invalid.",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 21},
+      "targets": [
+        {
+          "expr": "sum by (outcome) (rate(sync_cycles_total[1m]))",
+          "legendFormat": "{{outcome}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {"defaults": {"unit": "ops"}}
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "Sync cycle duration",
+      "description": "How long one full read of the world takes.",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 21},
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(sync_cycle_duration_seconds_bucket[1m])))",
+          "legendFormat": "p95",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(sync_cycle_duration_seconds_bucket[1m])))",
+          "legendFormat": "p50",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {"defaults": {"unit": "s"}}
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "Degraded mode and stale data",
+      "description": "The two flags that drive the dashboard's DEGRADED banner.",
+      "gridPos": {"h": 7, "w": 12, "x": 0, "y": 29},
+      "targets": [
+        {"expr": "degraded_mode", "legendFormat": "degraded", "refId": "A"},
+        {"expr": "stale_data", "legendFormat": "stale", "refId": "B"}
+      ],
+      "fieldConfig": {"defaults": {"min": 0, "max": 1}}
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "Malformed simulator payloads",
+      "description": "Responses the schema check refused. Non-zero means the platform rejected bad data instead of storing it.",
+      "gridPos": {"h": 7, "w": 12, "x": 12, "y": 29},
+      "targets": [
+        {
+          "expr": "sum by (endpoint) (rate(simulator_validation_rejections_total[5m]))",
+          "legendFormat": "{{endpoint}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {"defaults": {"unit": "ops"}}
+    },
+    {
+      "id": 14,
+      "type": "timeseries",
+      "title": "Demand observations ingested",
+      "description": "The demand history the forecaster learns from.",
+      "gridPos": {"h": 7, "w": 12, "x": 0, "y": 36},
+      "targets": [
+        {
+          "expr": "sum by (outcome) (rate(demand_observations_ingested_total[1m]))",
+          "legendFormat": "{{outcome}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {"defaults": {"unit": "ops"}}
+    },
+    {
+      "id": 15,
+      "type": "timeseries",
+      "title": "Allocation conflicts",
+      "description": "The simulator refusing an allocation, by conflict code.",
+      "gridPos": {"h": 7, "w": 12, "x": 12, "y": 36},
+      "targets": [
+        {"expr": "allocation_conflicts_total", "legendFormat": "conflicts", "refId": "A"},
+        {
+          "expr": "sum by (code) (allocation_conflicts_by_code_total)",
+          "legendFormat": "{{code}}",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {"defaults": {"unit": "short"}}
+    }
+  ]
+}

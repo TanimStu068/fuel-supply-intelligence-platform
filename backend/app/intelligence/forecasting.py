@@ -963,6 +963,36 @@ class ForecastSelector:
         #: degraded model into twelve "fallback activations" and bury the
         #: signal in noise.
         self._counted_reasons: set[str] = set()
+        #: The kill-switch. When set, the learned model is not consulted at
+        #: all — not for training, not for forecasting. This is what an
+        #: operator reaches for when the model is producing bad numbers and
+        #: the platform needs to stop using it *now*, without a redeploy.
+        self._kill_switch = False
+
+    @property
+    def kill_switch(self) -> bool:
+        """True when the learned model is disabled by the kill-switch."""
+        return self._kill_switch
+
+    def set_kill_switch(self, enabled: bool) -> bool:
+        """Turn the learned model on or off. Returns the new state.
+
+        Turning the kill-switch on is deliberately not reversible by
+        accident: the caller has to turn it off again explicitly, and the
+        learned model has to earn its trust back through the normal
+        confidence and training-row checks.
+        """
+        self._kill_switch = bool(enabled)
+        # The counted reasons are cleared so the *new* reason is counted
+        # once, rather than the old one being suppressed as "already
+        # counted" from a previous evaluation.
+        self._counted_reasons.clear()
+        logger.warning(
+            "the ml kill-switch was turned %s",
+            "on" if self._kill_switch else "off",
+            extra={"kill_switch": self._kill_switch},
+        )
+        return self._kill_switch
 
     @property
     def learned(self) -> LearnedPredictor:
@@ -1016,7 +1046,15 @@ class ForecastSelector:
                 ):
                     return ModelKind.BASELINE
 
+                # The kill-switch overrides every check above: with it on,
+                # the learned model is not in use however good its numbers
+                # look. This is the whole point of a kill switch.
+                if self._kill_switch:
+                    return ModelKind.BASELINE
+
                 return ModelKind.LEARNED
+        if self._kill_switch:
+            return ModelKind.BASELINE
         return ModelKind.BASELINE
 
     def forecast(
@@ -1066,6 +1104,11 @@ class ForecastSelector:
 
     def _fallback_reason(self, history: list[HistoryPoint]) -> str | None:
         """Why the learned model cannot be used, or ``None`` if it can."""
+        # The kill-switch is checked first: when it is on the learned model
+        # is not used, whatever its state. This is the whole point of a kill
+        # switch — it must be able to stop a model that *looks* healthy.
+        if self._kill_switch:
+            return "the ml kill-switch is on: the learned model is disabled"
         if not self._learned.is_trained:
             return "the learned model is not trained"
         model = self._learned.model
@@ -1138,6 +1181,12 @@ def _normalise_reason(reason: str | None) -> str:
     """Reduce a free-text reason to a stable metric label."""
     if reason is None:
         return "unknown"
+    # The kill-switch is checked before everything else. An operator who
+    # turns the model off needs to see *that* on the dashboard, not a
+    # generic "model_error" — those two mean very different things: one
+    # is deliberate, the other is a fault.
+    if "kill-switch" in reason:
+        return "kill_switch"
     if "not trained" in reason:
         return "not_trained"
     if "training rows" in reason:

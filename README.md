@@ -54,9 +54,9 @@ Every number the dashboard shows comes from the live simulator through the
 backend. Nothing is fabricated, and nothing reaches the simulator without an
 explicit human approval.
 
-> **Status:** Day 5 of 7 complete. Days 6 and 7 are planned below.
+> **Status:** Day 6 of 7 complete. Day 7 is planned below.
 > Submission deadline: **26 November 2026**.
-> Latest report: [`docs/progress/day5.md`](docs/progress/day5.md)
+> Latest report: [`docs/progress/day6.md`](docs/progress/day6.md)
 
 ---
 
@@ -169,7 +169,7 @@ Observe → Detect → Predict → Decide → Simulate → Act → Monitor → R
 | Database | Postgres 16 (Alembic migrations) |
 | Observability | Prometheus, Grafana, structured JSON logs with correlation IDs |
 | Delivery | Docker Compose, GitHub Actions |
-| Load testing | k6 or Locust *(Day 6)* |
+| Load testing | k6 or Locust — a standalone `httpx` harness, plus a Locust file |
 
 ---
 
@@ -226,7 +226,15 @@ Observe → Detect → Predict → Decide → Simulate → Act → Monitor → R
 │   ├── policy-comparison.md       the decision policy vs. a naive baseline
 │   └── fault-tests.md             the fault-injection transcripts
 │
-├── docker-compose.yml             the whole stack: 6 services
+├── docker-compose.yml             the whole stack: 7 services, memory-limited
+├── infra/
+│   ├── prometheus/                the scrape config and the 15 alert rules
+│   └── grafana/                   the four dashboards, provisioned as code
+├── scripts/
+│   ├── crisis_drill.py            14 scenarios, measured and written to a report
+│   ├── loadtest/                  the load harness and its raw results
+│   ├── search_logs.py             search the structured JSON logs
+│   └── stack_guard.sh             keep the host usable alongside other stacks
 ├── .env.example                   every configuration key, with defaults
 └── .github/workflows/ci.yml       lint, test, build, compose validation
 ```
@@ -258,6 +266,32 @@ docker compose up --build
 
 Ports are remapped locally to avoid conflicts. Check the real ones with
 `docker compose ps`.
+
+#### Running it on a busy machine
+
+This stack is seven containers. On a laptop that is already running other
+Docker projects, that is enough to make the machine unresponsive — so every
+service here has a **memory limit**, a **CPU limit** and **log rotation**,
+and the three observability services sit behind a profile:
+
+```bash
+docker compose up -d --wait                             # the platform: 4 containers
+docker compose --profile observability up -d --wait    # + Prometheus, Grafana, cAdvisor
+```
+
+If the machine is already struggling, `scripts/stack_guard.sh` is the
+one-stop shop:
+
+```bash
+scripts/stack_guard.sh status        # what is running, and how much memory it uses
+scripts/stack_guard.sh stop-all      # stop every container on the host
+scripts/stack_guard.sh harden         # a 1 GB limit and no restart loop on all of them
+scripts/stack_guard.sh start-fuel     # this stack, light, with the observability profile
+```
+
+`harden` also writes `docs/host-tuning/daemon.json`, the daemon
+configuration for log rotation — copy it to `/etc/docker/daemon.json` (with
+`sudo`) and restart the Docker daemon to apply it host-wide.
 
 Verify:
 
@@ -418,7 +452,7 @@ to `main` and an update to the company.
 | 3 | 21 Nov | Intelligence layer (forecast, shortage prediction, detection) | **Done** |
 | 4 | 22 Nov | Decision engine, recommendations, simulate and act | **Done** |
 | 5 | 23 Nov | Operator dashboard | **Done** |
-| 6 | 24 Nov | Resilience, observability, crisis drills, load testing | Planned |
+| 6 | 24 Nov | Resilience, observability, crisis drills, load testing | **Done** |
 | 7 | 25 Nov | CI/CD, tests, docs, demo prep, release `v1.0.0` | Planned |
 | Buffer | 26 Nov | Fresh-clone test and submission only | Planned |
 
@@ -523,19 +557,28 @@ Playwright end-to-end tests against the running stack, all passing. The
 dashboard is served by `docker compose up` on `:5173`. — **Proven live**; see
 [`docs/progress/day5.md`](docs/progress/day5.md).
 
-### Day 6 — Resilience, observability, crisis drills, load testing *(planned)*
+### Day 6 — Resilience, observability, crisis drills, load testing *(done)*
 
 * Prometheus and Grafana provisioned as code: Application, System, Intelligence
-  and Integration dashboards, plus alert rules
+  and Integration dashboards, plus 15 alert rules in 4 groups — all verified by
+  firing them, not by reading them
 * Circuit breaker, timeouts, malformed-data rejection with alert, ML kill
   switch, cached degraded mode, graceful shutdown, compose health checks
 * `scripts/crisis_drill.py`: baseline, demand spike, shipment delay, depot
   constraint, route disruption, combined crisis and all five fault types;
-  results in `docs/resilience-report.md`
+  results in `docs/resilience-report.md` — **14 of 14 recovered automatically**
 * Load tests on the dashboard API, the recommendation API and an end-to-end
   decision request; report in `docs/load-test-report.md`, with one bottleneck fix
-  and before/after numbers
-* Searchable audit, decision and event logs
+  and before/after numbers — **p99 30 030 ms → 286 ms**, and the container
+  stopped being OOM-killed
+* Searchable audit, decision and event logs — `GET /api/audit` over three
+  tables, and `scripts/search_logs.py` over the structured JSON logs
+
+**Verified:** 14 of 14 crisis, fault and dependency scenarios recovered
+automatically; the p99 of the dashboard read path went from 30 030 ms to
+286 ms once the prediction-error aggregate moved into SQL; 359 backend tests,
+22 Vitest tests, all passing. — **Proven live**; see
+[`docs/progress/day6.md`](docs/progress/day6.md).
 
 ### Day 7 — CI/CD, tests, docs, demo prep, release *(planned)*
 
@@ -572,9 +615,9 @@ Never cut: the load test, the resilience report, or the fresh-clone test.
 | 5 | Operator interface | `frontend/` | **Done** (Day 5) — nine screens over the live API |
 | 6 | Architecture diagram | [`docs/assets/architecture.png`](docs/assets/architecture.png), §3 | **Done** — final Day 7 |
 | 7 | Deployment | `docker-compose.yml`, `.github/workflows/ci.yml` | Compose done, CI/CD final Day 7 |
-| 8 | Observability evidence | Grafana dashboards, `/metrics`, JSON logs | Metrics and logs done (Days 2–3), dashboards Day 6 |
-| 9 | Resilience demonstration | [`docs/fault-tests.md`](docs/fault-tests.md), `docs/resilience-report.md` | Fault tests done (Day 2), full report Day 6 |
-| 10 | Load-test evidence | `docs/load-test-report.md` | Day 6 |
+| 8 | Observability evidence | Grafana dashboards, `/metrics`, JSON logs | **Done** (Day 6) — 4 provisioned dashboards, 15 alert rules, 4 screenshots |
+| 9 | Resilience demonstration | [`docs/fault-tests.md`](docs/fault-tests.md), [`docs/resilience-report.md`](docs/resilience-report.md) | **Done** (Day 6) — 14 of 14 scenarios recovered automatically |
+| 10 | Load-test evidence | [`docs/load-test-report.md`](docs/load-test-report.md) | **Done** (Day 6) — 3 workloads, p99 30 030 ms → 286 ms |
 | 11 | Final demo | `docs/demo-script.md` | Day 7 |
 
 ---

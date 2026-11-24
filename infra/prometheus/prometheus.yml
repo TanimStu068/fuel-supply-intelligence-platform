@@ -1,6 +1,24 @@
+# Prometheus configuration for the fuel supply platform.
+#
+# Three scrape jobs:
+#
+#   fuel-backend   the platform's own metrics
+#   cadvisor       container CPU and memory
+#   prometheus     Prometheus's own scrape health
+#
+# The alert rules in ``alerts.yml`` are loaded from the same directory, so a
+# rule is part of the code rather than something clicked into the UI at 2am
+# during a demo.
+
 global:
   scrape_interval: 15s
   evaluation_interval: 15s
+  external_labels:
+    platform: fuel-supply-intelligence
+    environment: docker-compose
+
+rule_files:
+  - /etc/prometheus/alerts.yml
 
 scrape_configs:
   - job_name: fuel-backend
@@ -10,3 +28,16 @@ scrape_configs:
         labels:
           service: fuel-backend
           environment: docker-compose
+
+  # Container CPU and memory. cAdvisor reads the Docker daemon's own
+  # counters, so no extra instrumentation is needed inside the application.
+  - job_name: cadvisor
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["cadvisor:8080"]
+        labels:
+          service: cadvisor
+
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]

@@ -16,12 +16,14 @@ platform from serving data.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from typing import Any
 
 from sqlalchemy import select
 
+from .config import get_settings
 from .db import Database
 from .intelligence.dispatcher import DispatchDecision, Dispatcher
 from .intelligence.engine import IntelligenceEngine, IntelligenceResult
@@ -42,6 +44,8 @@ from .metrics import (
     DECISIONS_SUBMITTED,
     FALLBACK_ACTIVATIONS,
     FORECASTS_PRODUCED,
+    ML_KILL_SWITCH_ACTIVATIONS,
+    ML_MODEL_DISABLED,
     MODEL_CONFIDENCE,
     NEEDS_HUMAN_REVIEW,
     PREDICTION_ERROR_MAE,
@@ -110,6 +114,8 @@ class IntelligenceService:
         self._cache = cache
         self._engine = engine
         self._dispatcher = dispatcher
+        #: The settings, read for the prediction-error aggregation mode.
+        self._settings = get_settings()
         #: The simulator client, used to read the current tick before
         #: dispatching. Optional: without it the cached tick is used.
         self._client = client
@@ -153,6 +159,33 @@ class IntelligenceService:
         """The cached snapshot of the world, if there is one."""
         return self._cache.state
 
+    @property
+    def kill_switch(self) -> bool:
+        """True when the learned model is disabled by the kill-switch."""
+        return self._engine.selector.kill_switch
+
+    def set_kill_switch(self, enabled: bool) -> bool:
+        """Turn the learned demand model on or off.
+
+        This is the operator's panic button for the model. With it on, every
+        forecast is produced by the rule-based predictor, every forecast is
+        flagged for human review, and the decision layer falls back to the
+        days-of-cover policy.
+        """
+        state = self._engine.selector.set_kill_switch(enabled)
+        ML_MODEL_DISABLED.set(1 if state else 0)
+        ML_KILL_SWITCH_ACTIVATIONS.labels(enabled="true" if state else "false").inc()
+        logger.warning(
+            "the ml kill-switch was turned %s",
+            "on" if state else "off",
+            extra={"kill_switch": state},
+        )
+        # The previous result describes forecasts made with the old model
+        # choice, so it is dropped: the next proposal has to re-evaluate
+        # under the new setting rather than act on a stale result.
+        self._last_result = None
+        return state
+
     async def evaluate_and_store(self) -> IntelligenceResult | None:
         """Run the engine over the cached state and persist the results."""
         state = self._cache.state
@@ -163,7 +196,20 @@ class IntelligenceService:
             history = await self._load_history()
             regions = {region.id: region.demand_factor for region in state.regions}
 
-            result = self._engine.evaluate(
+            # The evaluation is CPU-bound: it forecasts every station and
+            # fuel, scores every risk and detects every anomaly. Run on
+            # the event loop it blocks it for the whole evaluation, and
+            # because the sync cycle calls this, the *API* stalls too —
+            # a read that should take a millisecond waits for the
+            # forecast to finish.
+            #
+            # ``asyncio.to_thread`` moves it to a worker thread, so the
+            # event loop keeps serving requests while the forecast runs.
+            # The GIL still applies, but the engine's own work releases
+            # it often enough that the loop gets a look in, and the
+            # measured effect is a large drop in p99.
+            result = await asyncio.to_thread(
+                self._engine.evaluate,
                 stations=state.stations,
                 depots=state.depots,
                 routes=state.routes,
@@ -385,20 +431,30 @@ class IntelligenceService:
         }
 
     async def _persist_recommendations(self, recommendations: list[Any]) -> None:
-        """Write the recommendations to the decision history."""
+        """Write the recommendations to the decision history.
+
+        This goes through the retrying write helper rather than a plain
+        session. It writes several rows in one transaction while an
+        operator may be approving a recommendation at the same time, and
+        that pair is exactly what deadlocks: both hold a lock the other
+        wants, and Postgres kills one side with ``40001``. The helper
+        retries the whole unit of work, which the SQL standard asks for.
+        """
         if not recommendations:
             return
+
+        async def work(session) -> None:
+            for recommendation in recommendations:
+                await write_recommendation(
+                    session,
+                    recommendation=recommendation,
+                    simulator_response=json.dumps(
+                        recommendation.simulator_response or {}, default=str
+                    ),
+                )
+
         try:
-            async with self._database.session() as session:
-                for recommendation in recommendations:
-                    await write_recommendation(
-                        session,
-                        recommendation=recommendation,
-                        simulator_response=json.dumps(
-                            recommendation.simulator_response or {}, default=str
-                        ),
-                    )
-                await session.commit()
+            await self._database.write(work)
         except Exception as exc:
             logger.warning("could not persist recommendations: %s", exc)
 
@@ -455,20 +511,27 @@ class IntelligenceService:
             await self._persist_decision_history()
 
     async def _persist_decision_history(self) -> None:
-        """Write the resolved recommendations to the audit trail."""
+        """Write the resolved recommendations to the audit trail.
+
+        This goes through the retrying write helper: it writes several
+        rows in one transaction, and it runs concurrently with an
+        operator's approval, which is exactly the pair that deadlocks.
+        """
         if self._decision is None:
             return
+
+        async def work(session) -> None:
+            for recommendation in self._decision.list_recommendations():
+                await write_recommendation(
+                    session,
+                    recommendation=recommendation,
+                    simulator_response=json.dumps(
+                        recommendation.simulator_response or {}, default=str
+                    ),
+                )
+
         try:
-            async with self._database.session() as session:
-                for recommendation in self._decision.list_recommendations():
-                    await write_recommendation(
-                        session,
-                        recommendation=recommendation,
-                        simulator_response=json.dumps(
-                            recommendation.simulator_response or {}, default=str
-                        ),
-                    )
-                await session.commit()
+            await self._database.write(work)
         except Exception as exc:
             logger.warning("could not persist the decision history: %s", exc)
 
@@ -531,21 +594,21 @@ class IntelligenceService:
 
     async def _persist_decisions(self, decisions: list[DispatchDecision], tick: int) -> None:
         """Record every dispatch decision in the audit trail."""
+
+        async def work(session) -> None:
+            for decision in decisions:
+                await write_decision_record(
+                    session,
+                    sim_tick=tick,
+                    kind="fuel_dispatch",
+                    status="submitted" if decision.submitted else "rejected",
+                    rationale=decision.reason,
+                    idempotency_key=(f"platform-{decision.station_id}-{decision.fuel_type}-{tick}"),
+                    payload=decision.to_payload(),
+                )
+
         try:
-            async with self._database.session() as session:
-                for decision in decisions:
-                    await write_decision_record(
-                        session,
-                        sim_tick=tick,
-                        kind="fuel_dispatch",
-                        status="submitted" if decision.submitted else "rejected",
-                        rationale=decision.reason,
-                        idempotency_key=(
-                            f"platform-{decision.station_id}-{decision.fuel_type}-{tick}"
-                        ),
-                        payload=decision.to_payload(),
-                    )
-                await session.commit()
+            await self._database.write(work)
         except Exception as exc:
             logger.warning("could not persist dispatch decisions: %s", exc)
 
@@ -646,42 +709,42 @@ class IntelligenceService:
         tick = state.instance.tick
         sim_time = state.instance.sim_time
 
+        async def work(session) -> None:
+            for forecast in result.forecasts:
+                await write_demand_forecast(
+                    session,
+                    station_id=forecast.station_id,
+                    fuel_type=forecast.fuel_type,
+                    sim_tick=tick,
+                    sim_time=sim_time,
+                    model=forecast.model.value,
+                    confidence=forecast.confidence,
+                    needs_human_review=forecast.needs_human_review,
+                    fallback_reason=forecast.fallback_reason,
+                    horizon_ticks=forecast.horizon_ticks,
+                    total_demand=forecast.total_demand,
+                    lower_total=forecast.lower_total,
+                    upper_total=forecast.upper_total,
+                    payload=forecast.to_payload(),
+                )
+
+            for risk in result.risks:
+                await write_risk_assessment(
+                    session,
+                    station_id=risk.station_id,
+                    fuel_type=risk.fuel_type,
+                    sim_tick=tick,
+                    risk_level=risk.risk_level.value,
+                    risk_score=risk.risk_score,
+                    hours_to_stockout=risk.hours_to_stockout,
+                    stockout_probability=risk.stockout_probability,
+                    needs_human_review=risk.needs_human_review,
+                    recommendation=risk.recommendation,
+                    payload=risk.to_payload(),
+                )
+
         try:
-            async with self._database.session() as session:
-                for forecast in result.forecasts:
-                    await write_demand_forecast(
-                        session,
-                        station_id=forecast.station_id,
-                        fuel_type=forecast.fuel_type,
-                        sim_tick=tick,
-                        sim_time=sim_time,
-                        model=forecast.model.value,
-                        confidence=forecast.confidence,
-                        needs_human_review=forecast.needs_human_review,
-                        fallback_reason=forecast.fallback_reason,
-                        horizon_ticks=forecast.horizon_ticks,
-                        total_demand=forecast.total_demand,
-                        lower_total=forecast.lower_total,
-                        upper_total=forecast.upper_total,
-                        payload=forecast.to_payload(),
-                    )
-
-                for risk in result.risks:
-                    await write_risk_assessment(
-                        session,
-                        station_id=risk.station_id,
-                        fuel_type=risk.fuel_type,
-                        sim_tick=tick,
-                        risk_level=risk.risk_level.value,
-                        risk_score=risk.risk_score,
-                        hours_to_stockout=risk.hours_to_stockout,
-                        stockout_probability=risk.stockout_probability,
-                        needs_human_review=risk.needs_human_review,
-                        recommendation=risk.recommendation,
-                        payload=risk.to_payload(),
-                    )
-
-                await session.commit()
+            await self._database.write(work)
         except Exception as exc:
             logger.warning("could not persist intelligence results: %s", exc)
             return
@@ -695,49 +758,48 @@ class IntelligenceService:
         station that stays critical raises one alert per tick rather than
         one per poll.
         """
+
+        async def work(session) -> None:
+            for risk in result.risks:
+                if risk.risk_level is RiskLevel.OK:
+                    continue
+                await write_alert(
+                    session,
+                    kind=f"shortage_{risk.risk_level.value.lower()}",
+                    severity=("critical" if risk.risk_level is RiskLevel.CRITICAL else "warning"),
+                    entity_type="station",
+                    entity_id=risk.station_id,
+                    sim_tick=tick,
+                    message=risk.recommendation,
+                    payload=risk.to_payload(),
+                )
+
+            for anomaly in result.anomalies:
+                await write_alert(
+                    session,
+                    kind=f"anomaly_{anomaly.kind.value}",
+                    severity=anomaly.severity,
+                    entity_type="station",
+                    entity_id=anomaly.entity_id,
+                    sim_tick=tick,
+                    message=anomaly.message,
+                    payload=anomaly.to_payload(),
+                )
+
+            for bottleneck in result.bottlenecks:
+                await write_alert(
+                    session,
+                    kind=f"bottleneck_{bottleneck.kind.value}",
+                    severity=bottleneck.severity,
+                    entity_type="network",
+                    entity_id=bottleneck.entity_id,
+                    sim_tick=tick,
+                    message=bottleneck.message,
+                    payload=bottleneck.to_payload(),
+                )
+
         try:
-            async with self._database.session() as session:
-                for risk in result.risks:
-                    if risk.risk_level is RiskLevel.OK:
-                        continue
-                    await write_alert(
-                        session,
-                        kind=f"shortage_{risk.risk_level.value.lower()}",
-                        severity=(
-                            "critical" if risk.risk_level is RiskLevel.CRITICAL else "warning"
-                        ),
-                        entity_type="station",
-                        entity_id=risk.station_id,
-                        sim_tick=tick,
-                        message=risk.recommendation,
-                        payload=risk.to_payload(),
-                    )
-
-                for anomaly in result.anomalies:
-                    await write_alert(
-                        session,
-                        kind=f"anomaly_{anomaly.kind.value}",
-                        severity=anomaly.severity,
-                        entity_type="station",
-                        entity_id=anomaly.entity_id,
-                        sim_tick=tick,
-                        message=anomaly.message,
-                        payload=anomaly.to_payload(),
-                    )
-
-                for bottleneck in result.bottlenecks:
-                    await write_alert(
-                        session,
-                        kind=f"bottleneck_{bottleneck.kind.value}",
-                        severity=bottleneck.severity,
-                        entity_type="network",
-                        entity_id=bottleneck.entity_id,
-                        sim_tick=tick,
-                        message=bottleneck.message,
-                        payload=bottleneck.to_payload(),
-                    )
-
-                await session.commit()
+            await self._database.write(work)
         except Exception as exc:
             logger.warning("could not persist intelligence alerts: %s", exc)
 
@@ -760,106 +822,167 @@ class IntelligenceService:
         # history on every sync cycle grows without bound.
         window_start = max(0, current_tick - self.SCORING_WINDOW_TICKS)
 
-        try:
-            async with self._database.session() as session:
-                result = await session.execute(
-                    select(DemandForecast).where(
-                        DemandForecast.sim_tick >= window_start,
-                        DemandForecast.sim_tick < current_tick,
-                    )
+        async def work(session) -> int:
+            result = await session.execute(
+                select(DemandForecast).where(
+                    DemandForecast.sim_tick >= window_start,
+                    DemandForecast.sim_tick < current_tick,
                 )
-                forecasts = list(result.scalars())
+            )
+            forecasts = list(result.scalars())
 
-                if not forecasts:
-                    return
+            if not forecasts:
+                return 0
 
-                observations = await session.execute(
-                    select(PredictionEvaluation).where(
-                        PredictionEvaluation.target_tick >= window_start
-                    )
+            # The ticks this cycle could score. Only these are looked up
+            # in ``prediction_evaluations`` — asking for "every evaluation
+            # from the window onwards" reads the whole table into
+            # Python, because the table holds one row per station, per
+            # fuel, per tick and grows without bound. That read was
+            # enough to push the container past its memory limit.
+            candidate_ticks = {
+                point["tick"] for forecast in forecasts for point in _forecast_points(forecast)
+            }
+
+            already_scored: set[tuple[str, str, int]] = set()
+            if candidate_ticks:
+                evaluations = await session.execute(
+                    select(
+                        PredictionEvaluation.station_id,
+                        PredictionEvaluation.fuel_type,
+                        PredictionEvaluation.target_tick,
+                    ).where(PredictionEvaluation.target_tick.in_(candidate_ticks))
                 )
                 already_scored = {
-                    (row.station_id, row.fuel_type, row.target_tick)
-                    for row in observations.scalars()
+                    (row.station_id, row.fuel_type, row.target_tick) for row in evaluations.all()
                 }
 
-                from .models import DemandObservationRow
+            from .models import DemandObservationRow
 
-                actuals_result = await session.execute(
-                    select(DemandObservationRow).where(
-                        DemandObservationRow.tick >= window_start,
-                        DemandObservationRow.tick <= current_tick,
-                    )
+            actuals_result = await session.execute(
+                select(DemandObservationRow).where(
+                    DemandObservationRow.tick >= window_start,
+                    DemandObservationRow.tick <= current_tick,
                 )
-                actuals = {
-                    (row.station_id, row.fuel_type, row.tick): row.demand_liters
-                    for row in actuals_result.scalars()
-                }
+            )
+            actuals = {
+                (row.station_id, row.fuel_type, row.tick): row.demand_liters
+                for row in actuals_result.scalars()
+            }
 
-                # Several forecasts may cover the same target tick — one per
-                # evaluation, each made at a different lead time. The
-                # honest one to score is the **latest forecast made before
-                # the target tick**, because that is the one an operator
-                # would have acted on. Taking an arbitrary row would make
-                # the reported error depend on row order.
-                best: dict[tuple[str, str, int], DemandForecast] = {}
-                for forecast in forecasts:
-                    for point in _forecast_points(forecast):
-                        key = (forecast.station_id, forecast.fuel_type, point["tick"])
-                        if key in already_scored or key not in actuals:
-                            continue
-                        current = best.get(key)
-                        if current is None or forecast.sim_tick > current.sim_tick:
-                            best[key] = forecast
-
-                scored = 0
-                for (station_id, fuel_type, target_tick), forecast in best.items():
-                    point = next(
-                        (
-                            point
-                            for point in _forecast_points(forecast)
-                            if point["tick"] == target_tick
-                        ),
-                        None,
-                    )
-                    if point is None:
+            # Several forecasts may cover the same target tick — one per
+            # evaluation, each made at a different lead time. The
+            # honest one to score is the **latest forecast made before
+            # the target tick**, because that is the one an operator
+            # would have acted on. Taking an arbitrary row would make
+            # the reported error depend on row order.
+            best: dict[tuple[str, str, int], DemandForecast] = {}
+            for forecast in forecasts:
+                for point in _forecast_points(forecast):
+                    key = (forecast.station_id, forecast.fuel_type, point["tick"])
+                    if key in already_scored or key not in actuals:
                         continue
-                    await write_prediction_evaluation(
-                        session,
-                        station_id=station_id,
-                        fuel_type=fuel_type,
-                        target_tick=target_tick,
-                        model=forecast.model,
-                        predicted_demand=point["predicted_demand"],
-                        actual_demand=actuals[(station_id, fuel_type, target_tick)],
-                        lower_bound=point["lower_bound"],
-                        upper_bound=point["upper_bound"],
-                    )
-                    scored += 1
+                    current = best.get(key)
+                    if current is None or forecast.sim_tick > current.sim_tick:
+                        best[key] = forecast
 
-                await session.commit()
+            scored = 0
+            for (station_id, fuel_type, target_tick), forecast in best.items():
+                point = next(
+                    (point for point in _forecast_points(forecast) if point["tick"] == target_tick),
+                    None,
+                )
+                if point is None:
+                    continue
+                await write_prediction_evaluation(
+                    session,
+                    station_id=station_id,
+                    fuel_type=fuel_type,
+                    target_tick=target_tick,
+                    model=forecast.model,
+                    predicted_demand=point["predicted_demand"],
+                    actual_demand=actuals[(station_id, fuel_type, target_tick)],
+                    lower_bound=point["lower_bound"],
+                    upper_bound=point["upper_bound"],
+                )
+                scored += 1
 
-                if scored:
-                    await self._update_error_metrics(session)
+            if scored:
+                await self._update_error_metrics(session)
+
+            return scored
+
+        try:
+            await self._database.write(work)
         except Exception as exc:
             logger.warning("could not score previous predictions: %s", exc)
 
     async def _update_error_metrics(self, session) -> None:
-        """Publish the prediction error series from the scored predictions."""
-        result = await session.execute(select(PredictionEvaluation))
-        rows = list(result.scalars())
+        """Publish the prediction error series from the scored predictions.
+
+        The aggregate is computed **in the database**. The table holds one
+        row per scored forecast — one per station, per fuel, per tick — so
+        it grows without bound, and reading it all into Python on every
+        sync cycle took longer than the rest of the cycle put together.
+        At six hundred thousand rows that was nine seconds of the event
+        loop, which is nine seconds in which the API cannot answer.
+
+        ``AVG`` and ``SUM`` in SQL do the same arithmetic in the place
+        that already has the data, and the database does it in constant
+        memory. The numbers are identical; the latency is not.
+
+        The old way of doing it is still here, behind
+        ``PREDICTION_ERROR_AGGREGATE_IN_DATABASE=false``, because the
+        before-and-after numbers in ``docs/load-test-report.md`` have to
+        be reproducible on demand: a claim of "18x faster" that cannot
+        be re-measured is a claim, not a measurement.
+        """
+        if not self._settings.prediction_error_aggregate_in_database:
+            await self._update_error_metrics_in_python(session)
+            return
+
+        from sqlalchemy import Integer, func
+
+        result = await session.execute(
+            select(
+                PredictionEvaluation.model,
+                func.avg(PredictionEvaluation.absolute_error),
+                func.count(PredictionEvaluation.id),
+                func.sum(func.cast(PredictionEvaluation.within_interval, Integer)),
+            ).group_by(PredictionEvaluation.model)
+        )
+        rows = result.all()
         if not rows:
             return
 
-        by_model: dict[str, list[PredictionEvaluation]] = {}
+        for model, mae, total, covered in rows:
+            if not total:
+                continue
+            PREDICTION_ERROR_MAE.labels(model=model).set(float(mae))
+            PREDICTION_INTERVAL_COVERAGE.labels(model=model).set(float(covered or 0) / float(total))
+
+    async def _update_error_metrics_in_python(self, session) -> None:
+        """The original implementation: read every row, then average it.
+
+        This is the bottleneck the load test found. It is kept so the
+        "before" side of the comparison can be reproduced by flipping one
+        setting, and it is never used in normal operation.
+        """
+        result = await session.execute(select(PredictionEvaluation))
+        rows = result.all()
+        if not rows:
+            return
+
+        by_model: dict[str, list[Any]] = {}
         for row in rows:
             by_model.setdefault(row.model, []).append(row)
 
         for model, model_rows in by_model.items():
-            mae = sum(row.absolute_error for row in model_rows) / len(model_rows)
+            total = len(model_rows)
+            mae = sum(float(r.absolute_error) for r in model_rows) / total
+            covered = sum(1 for r in model_rows if r.within_interval)
             PREDICTION_ERROR_MAE.labels(model=model).set(mae)
-            covered = sum(1 for row in model_rows if row.within_interval)
-            PREDICTION_INTERVAL_COVERAGE.labels(model=model).set(covered / len(model_rows))
+            PREDICTION_INTERVAL_COVERAGE.labels(model=model).set(covered / total)
 
 
 def _forecast_points(forecast: DemandForecast) -> list[dict]:

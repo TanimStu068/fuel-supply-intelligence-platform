@@ -1,0 +1,228 @@
+{
+  "uid": "fuel-application",
+  "title": "Application",
+  "tags": ["fuel", "application"],
+  "timezone": "utc",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "10s",
+  "editable": true,
+  "time": {"from": "now-1h", "to": "now"},
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Availability",
+      "description": "The share of backend requests that did not fail. The platform's own uptime, measured at the API edge.",
+      "gridPos": {"h": 5, "w": 4, "x": 0, "y": 0},
+      "targets": [
+        {
+          "expr": "1 - (sum(rate(http_requests_total{status=~\"5..\"}[5m])) / clamp_min(sum(rate(http_requests_total[5m])), 0.001))",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "decimals": 3,
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0.999": {"text": "UP", "color": "green"},
+                "0.95": {"text": "DEGRADED", "color": "orange"},
+                "0": {"text": "DOWN", "color": "red"}
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Request rate",
+      "description": "Requests per second across the whole API surface.",
+      "gridPos": {"h": 5, "w": 4, "x": 4, "y": 0},
+      "targets": [{"expr": "sum(rate(http_requests_total[1m]))", "refId": "A"}],
+      "fieldConfig": {"defaults": {"unit": "reqps", "decimals": 2}}
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Error rate",
+      "description": "The share of requests that returned a 5xx.",
+      "gridPos": {"h": 5, "w": 4, "x": 8, "y": 0},
+      "targets": [
+        {
+          "expr": "sum(rate(http_requests_total{status=~\"5..\"}[5m])) / clamp_min(sum(rate(http_requests_total[5m])), 0.001)",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 4,
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {"text": "0%", "color": "green"},
+                "0.01": {"text": ">1%", "color": "orange"},
+                "0.05": {"text": ">5%", "color": "red"}
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "p95 latency",
+      "description": "The 95th percentile of the backend's own request latency.",
+      "gridPos": {"h": 5, "w": 4, "x": 12, "y": 0},
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket[5m])))",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {"defaults": {"unit": "s", "decimals": 3}}
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "p99 latency",
+      "description": "The 99th percentile. The slowest one percent of requests — the ones a judge might notice.",
+      "gridPos": {"h": 5, "w": 4, "x": 16, "y": 0},
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(http_request_duration_seconds_bucket[5m])))",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {"defaults": {"unit": "s", "decimals": 3}}
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "In-flight (degraded)",
+      "description": "1 while the platform is serving last-known state because the simulator is unreachable.",
+      "gridPos": {"h": 5, "w": 4, "x": 20, "y": 0},
+      "targets": [{"expr": "degraded_mode", "refId": "A"}],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {"type": "value", "options": {"0": {"text": "HEALTHY", "color": "green"}, "1": {"text": "DEGRADED", "color": "red"}}}
+          ]
+        }
+      }
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Request rate by path",
+      "description": "Which endpoints the dashboard is actually hitting.",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 5},
+      "targets": [
+        {"expr": "sum by (path) (rate(http_requests_total[1m]))", "legendFormat": "{{path}}", "refId": "A"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "reqps"}}
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Latency percentiles",
+      "description": "p50, p95 and p99 of the backend's request latency, over one minute.",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 5},
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(http_request_duration_seconds_bucket[1m])))",
+          "legendFormat": "p50",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket[1m])))",
+          "legendFormat": "p95",
+          "refId": "B"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(http_request_duration_seconds_bucket[1m])))",
+          "legendFormat": "p99",
+          "refId": "C"
+        }
+      ],
+      "fieldConfig": {"defaults": {"unit": "s"}}
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "Errors by status",
+      "description": "Server errors over time, split by path.",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 13},
+      "targets": [
+        {
+          "expr": "sum by (path, status) (rate(http_requests_total{status=~\"5..\"}[1m]))",
+          "legendFormat": "{{path}} → {{status}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {"defaults": {"unit": "reqps"}}
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Requests by status class",
+      "description": "The mix of 2xx, 4xx and 5xx answers.",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 13},
+      "targets": [
+        {
+          "expr": "sum by (status) (rate(http_requests_total[1m]))",
+          "legendFormat": "{{status}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {"defaults": {"unit": "reqps"}}
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "Circuit breaker",
+      "description": "1 while the simulator's circuit breaker is open — the platform refusing to call, so the simulator can recover.",
+      "gridPos": {"h": 6, "w": 12, "x": 0, "y": 21},
+      "targets": [{"expr": "circuit_open{circuit=\"simulator\"}", "legendFormat": "open", "refId": "A"}],
+      "fieldConfig": {
+        "defaults": {
+          "min": 0,
+          "max": 1,
+          "mappings": [
+            {"type": "value", "options": {"0": {"text": "CLOSED", "color": "green"}, "1": {"text": "OPEN", "color": "red"}}}
+          ]
+        }
+      }
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "Circuit breaker calls",
+      "description": "Calls the breaker allowed through, and calls it refused without sending.",
+      "gridPos": {"h": 6, "w": 12, "x": 12, "y": 21},
+      "targets": [
+        {
+          "expr": "sum by (circuit) (rate(circuit_calls_allowed_total[1m]))",
+          "legendFormat": "allowed · {{circuit}}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum by (circuit) (rate(circuit_calls_refused_total[1m]))",
+          "legendFormat": "refused · {{circuit}}",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {"defaults": {"unit": "reqps"}}
+    }
+  ]
+}

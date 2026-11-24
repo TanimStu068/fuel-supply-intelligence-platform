@@ -410,6 +410,32 @@ def test_the_selector_falls_back_when_the_model_raises() -> None:
     assert selector.fallback_counts.get("model_error") == 1
 
 
+def test_the_kill_switch_is_counted_as_its_own_reason() -> None:
+    """An operator turning the model off is not the same as a fault.
+
+    The fallback reason is what the Intelligence dashboard breaks down by.
+    A deliberate kill-switch and a model that crashed are different
+    events, and an operator reading the dashboard has to be able to tell
+    them apart at a glance.
+    """
+    selector = ForecastSelector(config=ForecastSelectorConfig(min_training_rows=1))
+    selector.learned._model = _fake_trained_model(training_rows=100)
+    selector.learned.forecast = _high_confidence_forecast
+
+    selector.set_kill_switch(True)
+
+    forecast = selector.forecast(
+        context=_context(), fuel="DIESEL", horizon_ticks=4, history=_history()
+    )
+
+    assert forecast.model is ModelKind.BASELINE
+    assert forecast.needs_human_review is True
+    assert "kill-switch" in forecast.fallback_reason
+    # Not "model_error": the model did not break, it was switched off.
+    assert selector.fallback_counts.get("kill_switch") == 1
+    assert selector.fallback_counts.get("model_error") is None
+
+
 def test_the_selector_falls_back_when_confidence_is_too_low() -> None:
     selector = ForecastSelector(
         config=ForecastSelectorConfig(min_confidence=0.99, min_training_rows=1)

@@ -1,0 +1,158 @@
+[
+  {
+    "name": "dashboard",
+    "title": "The dashboard's read path",
+    "description": "Ten endpoints, the way the operator's dashboard polls them. This is the read path that every open browser tab drives.",
+    "started_at": "2026-11-24T07:08:17.206518+00:00",
+    "finished_at": "2026-11-24T07:09:55.802967+00:00",
+    "elapsed_seconds": 98.6,
+    "requests": 10063,
+    "throughput_rps": 102.06,
+    "error_rate": 0.0,
+    "latency": {
+      "count": 10063,
+      "average_ms": 225.65,
+      "p50_ms": 71.97,
+      "p95_ms": 272.98,
+      "p99_ms": 8869.63,
+      "min_ms": 0.89,
+      "max_ms": 10035.22
+    },
+    "stages": [
+      {
+        "users": 1,
+        "seconds": 15,
+        "requests": 230,
+        "rps": 14.61,
+        "p50_ms": 3.95,
+        "p95_ms": 12.62,
+        "p99_ms": 774.47,
+        "errors": 0
+      },
+      {
+        "users": 5,
+        "seconds": 20,
+        "requests": 1206,
+        "rps": 52.46,
+        "p50_ms": 12.29,
+        "p95_ms": 37.72,
+        "p99_ms": 921.75,
+        "errors": 0
+      },
+      {
+        "users": 20,
+        "seconds": 25,
+        "requests": 3106,
+        "rps": 114.14,
+        "p50_ms": 37.18,
+        "p95_ms": 119.35,
+        "p99_ms": 8826.69,
+        "errors": 0
+      },
+      {
+        "users": 50,
+        "seconds": 30,
+        "requests": 5521,
+        "rps": 169.07,
+        "p50_ms": 99.93,
+        "p95_ms": 301.6,
+        "p99_ms": 8916.85,
+        "errors": 0
+      }
+    ],
+    "by_endpoint": [
+      {
+        "endpoint": "/api/alerts",
+        "requests": 1009,
+        "average_ms": 429.83,
+        "p50_ms": 161.94,
+        "p95_ms": 390.62,
+        "p99_ms": 9546.57,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/service-health",
+        "requests": 982,
+        "average_ms": 440.05,
+        "p50_ms": 168.03,
+        "p95_ms": 358.47,
+        "p99_ms": 9691.6,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/risk",
+        "requests": 1013,
+        "average_ms": 248.59,
+        "p50_ms": 67.69,
+        "p95_ms": 178.25,
+        "p99_ms": 9062.46,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/routes",
+        "requests": 1016,
+        "average_ms": 170.57,
+        "p50_ms": 60.51,
+        "p95_ms": 177.6,
+        "p99_ms": 8283.84,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/stations",
+        "requests": 1031,
+        "average_ms": 155.34,
+        "p50_ms": 58.28,
+        "p95_ms": 164.74,
+        "p99_ms": 1205.33,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/depots",
+        "requests": 1022,
+        "average_ms": 222.21,
+        "p50_ms": 59.12,
+        "p95_ms": 158.57,
+        "p99_ms": 8826.69,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/allocations",
+        "requests": 991,
+        "average_ms": 157.09,
+        "p50_ms": 57.38,
+        "p95_ms": 147.41,
+        "p99_ms": 8398.69,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/supply-arrivals",
+        "requests": 998,
+        "average_ms": 151.46,
+        "p50_ms": 57.8,
+        "p95_ms": 144.89,
+        "p99_ms": 1175.5,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations",
+        "requests": 1003,
+        "average_ms": 203.97,
+        "p50_ms": 84.04,
+        "p95_ms": 139.38,
+        "p99_ms": 8404.26,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/events",
+        "requests": 998,
+        "average_ms": 81.22,
+        "p50_ms": 65.92,
+        "p95_ms": 134.38,
+        "p99_ms": 363.97,
+        "error_rate": 0.0
+      }
+    ],
+    "container_cpu_cores": [],
+    "container_memory_bytes": []
+  }
+]

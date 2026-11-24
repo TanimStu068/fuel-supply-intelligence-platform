@@ -1,0 +1,175 @@
+[
+  {
+    "name": "dashboard",
+    "title": "The dashboard's read path",
+    "description": "Ten endpoints, the way the operator's dashboard polls them. This is the read path that every open browser tab drives.",
+    "started_at": "2026-11-24T09:11:47.568112+00:00",
+    "finished_at": "2026-11-24T09:13:25.050363+00:00",
+    "elapsed_seconds": 97.48,
+    "requests": 3773,
+    "throughput_rps": 38.7,
+    "error_rate": 0.0,
+    "conflicts": 0,
+    "latency": {
+      "count": 3773,
+      "average_ms": 575.0,
+      "p50_ms": 313.24,
+      "p95_ms": 1837.26,
+      "p99_ms": 3014.54,
+      "min_ms": 1.09,
+      "max_ms": 5379.78
+    },
+    "stages": [
+      {
+        "users": 1,
+        "seconds": 15,
+        "requests": 453,
+        "rps": 28.11,
+        "p50_ms": 5.47,
+        "p95_ms": 164.76,
+        "p99_ms": 289.58,
+        "errors": 0
+      },
+      {
+        "users": 5,
+        "seconds": 20,
+        "requests": 832,
+        "rps": 39.53,
+        "p50_ms": 62.63,
+        "p95_ms": 414.27,
+        "p99_ms": 536.01,
+        "errors": 0
+      },
+      {
+        "users": 20,
+        "seconds": 25,
+        "requests": 1105,
+        "rps": 41.09,
+        "p50_ms": 300.68,
+        "p95_ms": 1512.14,
+        "p99_ms": 1912.28,
+        "errors": 0
+      },
+      {
+        "users": 50,
+        "seconds": 30,
+        "requests": 1383,
+        "rps": 41.38,
+        "p50_ms": 938.18,
+        "p95_ms": 2553.28,
+        "p99_ms": 4118.74,
+        "errors": 0
+      }
+    ],
+    "by_endpoint": [
+      {
+        "endpoint": "/api/service-health",
+        "requests": 338,
+        "average_ms": 1071.69,
+        "p50_ms": 637.91,
+        "p95_ms": 3774.58,
+        "p99_ms": 4409.06,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/alerts",
+        "requests": 396,
+        "average_ms": 1064.88,
+        "p50_ms": 767.2,
+        "p95_ms": 2880.43,
+        "p99_ms": 4131.05,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations",
+        "requests": 377,
+        "average_ms": 832.48,
+        "p50_ms": 780.74,
+        "p95_ms": 1759.55,
+        "p99_ms": 1957.45,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/events",
+        "requests": 357,
+        "average_ms": 587.11,
+        "p50_ms": 432.55,
+        "p95_ms": 1529.58,
+        "p99_ms": 1683.65,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/supply-arrivals",
+        "requests": 351,
+        "average_ms": 459.83,
+        "p50_ms": 310.04,
+        "p95_ms": 1514.38,
+        "p99_ms": 1677.88,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/allocations",
+        "requests": 345,
+        "average_ms": 411.49,
+        "p50_ms": 214.58,
+        "p95_ms": 1460.87,
+        "p99_ms": 1679.08,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/stations",
+        "requests": 406,
+        "average_ms": 365.94,
+        "p50_ms": 156.21,
+        "p95_ms": 1424.73,
+        "p99_ms": 1869.72,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/risk",
+        "requests": 397,
+        "average_ms": 372.77,
+        "p50_ms": 151.42,
+        "p95_ms": 1144.44,
+        "p99_ms": 1508.12,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/routes",
+        "requests": 402,
+        "average_ms": 334.94,
+        "p50_ms": 141.71,
+        "p95_ms": 1034.71,
+        "p99_ms": 1459.94,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/depots",
+        "requests": 404,
+        "average_ms": 315.67,
+        "p50_ms": 142.71,
+        "p95_ms": 1024.67,
+        "p99_ms": 1476.76,
+        "error_rate": 0.0
+      }
+    ],
+    "container_cpu_cores": [
+      0.06315,
+      0.04284166666666667,
+      0.028874999999999998,
+      0.064125
+    ],
+    "container_memory_bytes": [
+      270637465.6,
+      255642828.8,
+      246415360.0,
+      227121561.6
+    ],
+    "host_load_average": [
+      4.7412109375,
+      4.296875,
+      4.76171875,
+      7.287109375
+    ]
+  }
+]

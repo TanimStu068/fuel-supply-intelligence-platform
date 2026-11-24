@@ -20,10 +20,12 @@ last-known state and says so, with a ``degraded`` flag and an age.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
 from contextlib import asynccontextmanager
+from datetime import datetime
 from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, Path, Query, Request, status
@@ -112,11 +114,41 @@ async def lifespan(app: FastAPI):
     try:
         if settings.sync_enabled:
             await app.state.sync.start()
+        logger.info("backend is ready")
         yield
     finally:
+        # Graceful shutdown, in the order the dependencies need:
+        #
+        # 1. Stop taking new work. The readiness flag makes the container
+        #    report "not ready" while it drains, so an orchestrator stops
+        #    routing new traffic here instead of cutting it off mid-request.
+        # 2. Stop the background loops, so nothing starts a new database
+        #    session or simulator call while we are closing.
+        # 3. Close the database and the simulator client, so no connection
+        #    is left dangling.
+        #
+        # The whole sequence is bounded by ``shutdown_grace_seconds`` so a
+        # wedged dependency cannot hold the container open forever and make
+        # Docker escalate to SIGKILL.
+        app.state.shutting_down = True
+        logger.info("backend is shutting down; draining")
         await app.state.sync.stop()
-        await app.state.database.disconnect()
-        await app.state.simulator.aclose()
+        try:
+            await asyncio.wait_for(
+                _close_dependencies(app),
+                timeout=settings.shutdown_grace_seconds,
+            )
+        except TimeoutError:
+            logger.warning(
+                "shutdown grace period expired; closing anyway",
+                extra={"grace_seconds": settings.shutdown_grace_seconds},
+            )
+
+
+async def _close_dependencies(app: FastAPI) -> None:
+    """Close the database and the simulator client."""
+    await app.state.database.disconnect()
+    await app.state.simulator.aclose()
 
 
 app = FastAPI(
@@ -210,18 +242,27 @@ class DecisionSettingsRequest(BaseModel):
 
 
 async def persist_decision(recommendation: Any) -> None:
-    """Write one recommendation to the audit trail."""
+    """Write one recommendation to the audit trail.
+
+    This goes through the retrying write helper. The approval path writes
+    at the same time as the sync service persists the decision history,
+    and that pair is what deadlocks on Postgres; the helper retries the
+    transaction, which is what the SQL standard says to do with a
+    ``40001``.
+    """
     from .repository import write_recommendation
 
     database = default_database
+
+    async def work(session) -> None:
+        await write_recommendation(
+            session,
+            recommendation=recommendation,
+            simulator_response=json.dumps(recommendation.simulator_response or {}, default=str),
+        )
+
     try:
-        async with database.session() as session:
-            await write_recommendation(
-                session,
-                recommendation=recommendation,
-                simulator_response=json.dumps(recommendation.simulator_response or {}, default=str),
-            )
-            await session.commit()
+        await database.write(work)
     except Exception as exc:
         logger.warning("could not persist the decision: %s", exc)
 
@@ -291,6 +332,39 @@ async def health(
             "version": get_settings().app_version,
             "components": components,
             "sync": request.app.state.sync.status(),
+        },
+    )
+
+
+@app.get("/ready", tags=["ops"])
+async def ready(request: Request) -> JSONResponse:
+    """Report whether the backend is ready to take traffic.
+
+    Readiness is deliberately *narrower* than liveness. The backend is
+    alive as soon as the process is running, but it is only ready when it
+    has a database connection and a simulator client, and it stops being
+    ready the moment it starts draining at shutdown.
+
+    The distinction matters during a rolling restart: Docker's healthcheck
+    should keep failing while the container drains, so the orchestrator
+    stops sending it traffic before the socket is closed.
+    """
+    shutting_down = bool(getattr(request.app.state, "shutting_down", False))
+
+    database_ok = False
+    try:
+        database_ok = await request.app.state.database.ping()
+    except Exception:
+        database_ok = False
+
+    ready_now = database_ok and not shutting_down
+
+    return JSONResponse(
+        status_code=status.HTTP_200_OK if ready_now else status.HTTP_503_SERVICE_UNAVAILABLE,
+        content={
+            "ready": ready_now,
+            "shutting_down": shutting_down,
+            "database": "ok" if database_ok else "error",
         },
     )
 
@@ -611,6 +685,7 @@ async def get_model_status(
 
     return {
         "active_model": selector.active_model.value,
+        "ml_kill_switch": selector.kill_switch,
         "fallback_reasons": selector.fallback_counts,
         "learned_model": (
             {
@@ -639,6 +714,43 @@ async def get_model_status(
             }
             if learned
             else {"trained": False}
+        ),
+    }
+
+
+class KillSwitchRequest(BaseModel):
+    """The body of a kill-switch update."""
+
+    #: Turn the learned model on (True) or off (False).
+    enabled: bool
+
+
+@app.post("/api/model/kill-switch", tags=["intelligence"])
+async def set_kill_switch(
+    body: KillSwitchRequest,
+    service: IntelligenceService = Depends(get_intelligence),
+) -> dict[str, Any]:
+    """Turn the learned demand model on or off.
+
+    The **kill-switch**. With it on, the platform stops using the learned
+    model entirely: every forecast comes from the rule-based predictor, every
+    forecast is flagged for human review, and the decision layer uses the
+    days-of-cover fallback policy.
+
+    It exists because a model can look healthy on every metric the platform
+    tracks and still be producing bad numbers for *this* network. When that
+    happens an operator needs to stop the model *now* — without a redeploy,
+    and without waiting for a confidence score to decay.
+    """
+    enabled = service.set_kill_switch(body.enabled)
+    return {
+        "ml_kill_switch": enabled,
+        "active_model": service.engine.selector.active_model.value,
+        "effect": (
+            "the learned model is disabled; every forecast uses the rule-based "
+            "predictor and is flagged for human review"
+            if enabled
+            else "the learned model may be used again, subject to the normal confidence checks"
         ),
     }
 
@@ -864,6 +976,84 @@ async def get_decision_history(
             }
             for row in rows
         ],
+    }
+
+
+@app.get("/api/audit", tags=["audit"])
+async def search_audit(
+    q: str | None = Query(default=None, description="Full-text search over the trail"),
+    source: str | None = Query(default=None, description="Comma-separated: decision, event, alert"),
+    kind: str | None = Query(default=None, description="Comma-separated kinds"),
+    status: str | None = Query(default=None, description="Comma-separated statuses"),
+    entity_id: str | None = Query(default=None),
+    since: datetime | None = Query(default=None),
+    until: datetime | None = Query(default=None),
+    limit: int = Query(default=200, ge=1, le=1000),
+    database: Database = Depends(get_database),
+) -> dict[str, Any]:
+    """Search the unified audit trail.
+
+    **One search over three trails.** The platform writes decisions, domain
+    events and alerts to three separate tables. This endpoint presents them
+    as one stream, so an operator can ask "what happened to this station?"
+    once instead of joining three tables by hand.
+
+    Every filter is optional and they compose:
+
+    ```bash
+    # Everything about one station
+    /api/audit?entity_id=station-karnaphuli
+
+    # Every critical alert in the last hour
+    /api/audit?source=alert&status=critical&since=2026-11-24T10:00:00Z
+
+    # Every mention of "route" in any trail
+    /api/audit?q=route
+    ```
+
+    The response carries the entries **and** a summary, so a search can be
+    read at a glance ("312 alerts, 47 of them critical") before drilling
+    into individual rows.
+    """
+    from .audit import read_audit_entries, summarise_audit_entries
+
+    def _split(value: str | None) -> list[str] | None:
+        if not value:
+            return None
+        parts = [part.strip() for part in value.split(",") if part.strip()]
+        return parts or None
+
+    try:
+        async with database.session() as session:
+            # The full match is read first, so the summary describes the
+            # whole result set rather than the page that is returned.
+            # Without this, a trail with 20,000 alerts and 300 decisions
+            # would report "300 decisions" as zero, because the newest
+            # page is all alerts.
+            everything = await read_audit_entries(
+                session,
+                sources=_split(source),
+                kinds=_split(kind),
+                statuses=_split(status),
+                entity_id=entity_id,
+                text=q,
+                since=since,
+                until=until,
+                limit=1000,
+            )
+            summary = await summarise_audit_entries(session, everything)
+            entries = everything[:limit]
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"could not read the audit trail: {exc}",
+        ) from exc
+
+    return {
+        "count": len(entries),
+        "total_matched": summary["count"],
+        "summary": summary,
+        "entries": [entry.to_dict() for entry in entries],
     }
 
 
@@ -1095,6 +1285,7 @@ async def service_health(
             "prediction_service": {
                 "status": "ok" if last_result is not None else "degraded",
                 "active_model": active_model,
+                "ml_kill_switch": intelligence.kill_switch if intelligence is not None else False,
                 "evaluated_at": last_result.evaluated_at.isoformat()
                 if last_result is not None and last_result.evaluated_at
                 else None,
@@ -1114,8 +1305,31 @@ async def service_health(
                 else 0.0,
             },
         },
+        # The circuit breaker is not a dependency — it is the mechanism the
+        # platform uses to protect one. It sits beside the components rather
+        # than among them, so "which things do we depend on" stays a
+        # clean, five-item answer.
+        "circuit_breaker": _circuit_breaker_snapshot(request),
         "http": _http_metrics(),
     }
+
+
+def _circuit_breaker_snapshot(request: Request) -> dict[str, Any]:
+    """The simulator circuit breaker's state, for the health panel.
+
+    An open breaker is not an outage by itself — it is the platform
+    *protecting* the simulator from a retry storm. The panel shows it so an
+    operator can tell "the simulator is down" apart from "the platform has
+    stopped calling because the simulator was down".
+    """
+    try:
+        client = request.app.state.simulator
+    except AttributeError:
+        return {"status": "unknown"}
+    breaker = client.breaker
+    snapshot = breaker.snapshot()
+    snapshot["status"] = breaker.state.value
+    return snapshot
 
 
 def _http_metrics() -> dict[str, Any]:

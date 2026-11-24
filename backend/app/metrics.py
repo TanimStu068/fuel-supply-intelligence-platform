@@ -53,6 +53,41 @@ SIMULATOR_STALE_RESPONSES = Counter(
     "Responses carrying the X-Simulator-Stale header.",
 )
 
+#: Calls the circuit breaker refused without sending them.
+CIRCUIT_CALLS_REFUSED = Counter(
+    "circuit_calls_refused_total",
+    "Calls refused by a circuit breaker without being sent.",
+    ["circuit"],
+)
+
+#: Calls the circuit breaker let through.
+CIRCUIT_CALLS_ALLOWED = Counter(
+    "circuit_calls_allowed_total",
+    "Calls a circuit breaker let through.",
+    ["circuit"],
+)
+
+#: Transitions between the breaker's states, by the state it moved to.
+CIRCUIT_STATE_TRANSITIONS = Counter(
+    "circuit_state_transitions_total",
+    "Circuit breaker state transitions, by the new state.",
+    ["circuit", "state"],
+)
+
+#: Whether each circuit breaker is currently open.
+CIRCUIT_OPEN = Gauge(
+    "circuit_open",
+    "1 when the circuit breaker is open, 0 otherwise.",
+    ["circuit"],
+)
+
+#: Simulator payloads rejected because they did not match the contract.
+SIMULATOR_VALIDATION_REJECTIONS = Counter(
+    "simulator_validation_rejections_total",
+    "Simulator responses rejected because they did not match the documented schema.",
+    ["endpoint"],
+)
+
 #: Sync cycles, labelled by outcome (success / failed).
 SYNC_CYCLES = Counter(
     "sync_cycles_total",
@@ -64,6 +99,15 @@ SYNC_CYCLES = Counter(
 SYNC_CYCLE_DURATION = Histogram(
     "sync_cycle_duration_seconds",
     "Duration of a full background sync cycle.",
+)
+
+#: Sync cycles that were skipped because another cycle was already
+#: running. A high count means the simulator's tick rate is outrunning the
+#: platform's ability to read the world, and the coalescing is what keeps
+#: the simulator's connection pool alive.
+SYNC_CYCLES_COALESCED = Counter(
+    "sync_cycles_coalesced_total",
+    "Sync requests collapsed into a cycle that was already running.",
 )
 
 #: SSE connections opened against the simulator stream.
@@ -234,6 +278,25 @@ DECISION_FALLBACK_ACTIVATIONS = Counter(
     "decision_fallback_activations_total",
     "Times the decision engine used the rule-based fallback policy, by reason.",
     ["reason"],
+)
+
+#: Whether the learned model is disabled by the kill-switch.
+ML_MODEL_DISABLED = Gauge(
+    "ml_model_disabled",
+    "1 when the ML kill-switch has disabled the learned model, 0 otherwise.",
+)
+
+#: How many times the kill-switch was flipped.
+ML_KILL_SWITCH_ACTIVATIONS = Counter(
+    "ml_kill_switch_activations_total",
+    "Times the ML kill-switch was flipped, by the new state.",
+    ["enabled"],
+)
+
+#: How many forecasts the kill-switch pushed onto the rule-based fallback.
+ML_KILL_SWITCH_FALLBACKS = Counter(
+    "ml_kill_switch_fallbacks_total",
+    "Forecasts served by the rule-based predictor because the kill-switch was on.",
 )
 
 #: How many decisions were made in the last minute.

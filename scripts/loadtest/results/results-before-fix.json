@@ -1,0 +1,175 @@
+[
+  {
+    "name": "dashboard",
+    "title": "The dashboard's read path",
+    "description": "Ten endpoints, the way the operator's dashboard polls them. This is the read path that every open browser tab drives.",
+    "started_at": "2026-11-24T11:36:49.810269+00:00",
+    "finished_at": "2026-11-24T11:39:08.759232+00:00",
+    "elapsed_seconds": 138.95,
+    "requests": 5801,
+    "throughput_rps": 41.75,
+    "error_rate": 0.0052,
+    "conflicts": 0,
+    "latency": {
+      "count": 5771,
+      "average_ms": 454.54,
+      "p50_ms": 7.96,
+      "p95_ms": 70.71,
+      "p99_ms": 30029.78,
+      "min_ms": 0.29,
+      "max_ms": 30887.7
+    },
+    "stages": [
+      {
+        "users": 1,
+        "seconds": 15,
+        "requests": 0,
+        "rps": 0.0,
+        "p50_ms": 0,
+        "p95_ms": 0,
+        "p99_ms": 0,
+        "errors": 0
+      },
+      {
+        "users": 5,
+        "seconds": 20,
+        "requests": 5,
+        "rps": 0.16,
+        "p50_ms": 30030.86,
+        "p95_ms": 30031.3,
+        "p99_ms": 30031.3,
+        "errors": 0
+      },
+      {
+        "users": 20,
+        "seconds": 25,
+        "requests": 5746,
+        "rps": 114.53,
+        "p50_ms": 7.92,
+        "p95_ms": 59.95,
+        "p99_ms": 1050.7,
+        "errors": 30
+      },
+      {
+        "users": 50,
+        "seconds": 30,
+        "requests": 50,
+        "rps": 1.58,
+        "p50_ms": 30030.27,
+        "p95_ms": 30044.84,
+        "p99_ms": 30049.69,
+        "errors": 0
+      }
+    ],
+    "by_endpoint": [
+      {
+        "endpoint": "/api/stations",
+        "requests": 640,
+        "average_ms": 3000.29,
+        "p50_ms": 8.51,
+        "p95_ms": 30030.16,
+        "p99_ms": 30033.8,
+        "error_rate": 0.0016
+      },
+      {
+        "endpoint": "/api/alerts",
+        "requests": 573,
+        "average_ms": 29.83,
+        "p50_ms": 8.05,
+        "p95_ms": 96.26,
+        "p99_ms": 555.44,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/service-health",
+        "requests": 565,
+        "average_ms": 24.84,
+        "p50_ms": 7.64,
+        "p95_ms": 89.49,
+        "p99_ms": 187.04,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/depots",
+        "requests": 585,
+        "average_ms": 280.26,
+        "p50_ms": 8.05,
+        "p95_ms": 34.77,
+        "p99_ms": 1187.95,
+        "error_rate": 0.0034
+      },
+      {
+        "endpoint": "/api/recommendations",
+        "requests": 573,
+        "average_ms": 74.33,
+        "p50_ms": 7.61,
+        "p95_ms": 31.24,
+        "p99_ms": 1045.38,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/routes",
+        "requests": 580,
+        "average_ms": 230.36,
+        "p50_ms": 8.16,
+        "p95_ms": 28.14,
+        "p99_ms": 1089.71,
+        "error_rate": 0.0069
+      },
+      {
+        "endpoint": "/api/events",
+        "requests": 572,
+        "average_ms": 123.36,
+        "p50_ms": 7.8,
+        "p95_ms": 25.34,
+        "p99_ms": 1006.87,
+        "error_rate": 0.0017
+      },
+      {
+        "endpoint": "/api/risk",
+        "requests": 576,
+        "average_ms": 173.26,
+        "p50_ms": 7.71,
+        "p95_ms": 24.92,
+        "p99_ms": 75.11,
+        "error_rate": 0.0295
+      },
+      {
+        "endpoint": "/api/allocations",
+        "requests": 567,
+        "average_ms": 119.99,
+        "p50_ms": 7.8,
+        "p95_ms": 24.74,
+        "p99_ms": 87.32,
+        "error_rate": 0.0018
+      },
+      {
+        "endpoint": "/api/supply-arrivals",
+        "requests": 570,
+        "average_ms": 178.39,
+        "p50_ms": 7.99,
+        "p95_ms": 23.44,
+        "p99_ms": 1038.5,
+        "error_rate": 0.007
+      }
+    ],
+    "container_cpu_cores": [
+      0.026208333333333333,
+      0.022475,
+      0.030758333333333332,
+      0.021841666666666665
+    ],
+    "container_memory_bytes": [
+      670878924.8,
+      670983782.4,
+      670983782.4,
+      670983782.4
+    ],
+    "host_load_average": [
+      3.23681640625,
+      3.32568359375,
+      3.16357421875,
+      2.7744140625
+    ]
+  }
+]

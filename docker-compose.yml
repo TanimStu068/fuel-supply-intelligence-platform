@@ -1,5 +1,32 @@
 name: fuel-supply-intelligence-platform
 
+# ---------------------------------------------------------------------------
+# Resource policy
+# ---------------------------------------------------------------------------
+# This machine is shared with several other projects' Docker stacks, and it
+# only has 12 cores and 7 GB of RAM. Running every service of every project
+# at once is what makes the desktop unresponsive: the containers are not
+# slow, the *scheduler* is.
+#
+# Three rules keep this stack from being the reason the machine locks up:
+#
+#   1. Every service carries an explicit memory and CPU limit. A container
+#      that leaks is killed at its limit instead of eating the host.
+#   2. Every service rotates its logs. An unbounded json-file log on a
+#      chatty service fills a disk and takes the whole daemon down.
+#   3. The observability stack (Prometheus + Grafana + cAdvisor) sits behind
+#      the ``observability`` profile, so the platform can run on its own
+#      when the machine is tight. ``docker compose --profile observability
+#      up`` brings the dashboards back.
+#
+# See docs/progress/day6.md ("Running the stack on a shared machine").
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   # ---------------------------------------------------------------------------
   # Organizer-provided simulator. The world we operate on; never modified.
@@ -8,6 +35,12 @@ services:
     image: ${SIMULATOR_IMAGE:-asifmahmoud414/bup-fuel-supply-simulator:1.0.0}
     container_name: fuel-simulator
     restart: unless-stopped
+    # The simulator's own pool is small (5 + 10 overflow). A hard memory
+    # ceiling keeps a leak in it from reaching the host.
+    mem_limit: ${SIMULATOR_MEM_LIMIT:-768m}
+    cpus: ${SIMULATOR_CPUS:-1.0}
+    pids_limit: 256
+    logging: *default-logging
     environment:
       SIMULATOR_START_MODE: ${SIMULATOR_START_MODE:-paused}
       SIMULATION_SPEED: ${SIMULATION_SPEED:-8}
@@ -47,6 +80,14 @@ services:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-fuel}:${POSTGRES_PASSWORD:-change-me-in-env}@postgres:5432/${POSTGRES_DB:-fuel}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       METRICS_ENABLED: ${METRICS_ENABLED:-true}
+      # --- resilience (Day 6) ---
+      # The simulator's connection pool is small (5 + 10 overflow). Without
+      # a breaker the backend's own retries exhaust it, which is how the
+      # simulator used to be knocked over by the platform polling it.
+      CIRCUIT_BREAKER_FAILURES: ${CIRCUIT_BREAKER_FAILURES:-5}
+      CIRCUIT_BREAKER_RECOVERY_SECONDS: ${CIRCUIT_BREAKER_RECOVERY_SECONDS:-20}
+      SIMULATOR_HEALTH_TIMEOUT: ${SIMULATOR_HEALTH_TIMEOUT:-2}
+      SHUTDOWN_GRACE_SECONDS: ${SHUTDOWN_GRACE_SECONDS:-15}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5173,http://localhost:3000,http://127.0.0.1:5173,http://localhost:4173,http://127.0.0.1:4173}
       # --- background sync (Day 2) ---
       SYNC_ENABLED: ${SYNC_ENABLED:-true}
@@ -59,9 +100,26 @@ services:
       # simulated day at the default 15-minute tick.
       FORECAST_HORIZON_TICKS: ${FORECAST_HORIZON_TICKS:-96}
       MODEL_TRAIN_INTERVAL: ${MODEL_TRAIN_INTERVAL:-300}
+      # The prediction-error aggregate is computed in SQL. Set it to false
+      # to reproduce the "before" side of the load test's bottleneck
+      # comparison — see docs/load-test-report.md.
+      PREDICTION_ERROR_AGGREGATE_IN_DATABASE: ${PREDICTION_ERROR_AGGREGATE_IN_DATABASE:-true}
       DISPATCH_ENABLED: ${DISPATCH_ENABLED:-true}
     ports:
       - "${BACKEND_PORT:-8001}:8000"
+    # The backend is the one service that must always be up. It carries a
+    # hard ceiling too: the platform has been seen holding ~240 MiB, and a
+    # runaway leak should be killed rather than allowed to push the host
+    # into swap.
+    mem_limit: ${BACKEND_MEM_LIMIT:-640m}
+    cpus: ${BACKEND_CPUS:-1.5}
+    pids_limit: 256
+    logging: *default-logging
+    # The backend drains on SIGTERM: it stops reporting ready, finishes the
+    # requests in flight, and closes its connections. The grace period is
+    # longer than the drain, so Docker does not escalate to SIGKILL while a
+    # request is still being served.
+    stop_grace_period: 30s
     healthcheck:
       test:
         [
@@ -82,6 +140,13 @@ services:
     image: postgres:16-alpine
     container_name: fuel-postgres
     restart: unless-stopped
+    # Postgres's shared buffers are the bulk of its footprint. Capping it
+    # keeps the database inside a known budget instead of letting it grow
+    # with the page cache.
+    mem_limit: ${POSTGRES_MEM_LIMIT:-640m}
+    cpus: ${POSTGRES_CPUS:-1.0}
+    pids_limit: 256
+    logging: *default-logging
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-fuel}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me-in-env}
@@ -106,6 +171,13 @@ services:
       dockerfile: Dockerfile
     container_name: fuel-frontend
     restart: unless-stopped
+    # The dashboard is a static bundle served by a tiny node server. It
+    # needs almost nothing, and saying so stops it competing for memory
+    # with the backend.
+    mem_limit: ${FRONTEND_MEM_LIMIT:-192m}
+    cpus: ${FRONTEND_CPUS:-0.5}
+    pids_limit: 128
+    logging: *default-logging
     depends_on:
       backend:
         condition: service_started
@@ -133,34 +205,96 @@ services:
     image: prom/prometheus:v2.54.1
     container_name: fuel-prometheus
     restart: unless-stopped
+    # Prometheus keeps a time series per container, so it is the one service
+    # that grows with the number of running containers. It is capped and
+    # lives behind the ``observability`` profile.
+    mem_limit: ${PROMETHEUS_MEM_LIMIT:-512m}
+    cpus: ${PROMETHEUS_CPUS:-0.75}
+    pids_limit: 128
+    logging: *default-logging
+    profiles: ["observability"]
     depends_on:
       backend:
         condition: service_started
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"
       - "--storage.tsdb.path=/prometheus"
+      - "--web.enable-lifecycle"
     volumes:
       - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      # The alert rules are mounted from the repository, so a rule is code
+      # rather than something configured through the UI.
+      - ./infra/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
       - prometheus-data:/prometheus
     ports:
       - "${PROMETHEUS_PORT:-9090}:9090"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:9090/-/healthy || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
 
   grafana:
     image: grafana/grafana:11.2.0
     container_name: fuel-grafana
     restart: unless-stopped
+    mem_limit: ${GRAFANA_MEM_LIMIT:-512m}
+    cpus: ${GRAFANA_CPUS:-0.75}
+    pids_limit: 128
+    logging: *default-logging
+    profiles: ["observability"]
     depends_on:
       prometheus:
-        condition: service_started
+        condition: service_healthy
     environment:
       GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-change-me-in-env}
       GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_DASHBOARDS_MIN_REFRESH_INTERVAL: "5s"
     volumes:
       - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro
       - grafana-data:/var/lib/grafana
     ports:
       - "${GRAFANA_PORT:-3000}:3000"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/api/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # ---------------------------------------------------------------------------
+  # Container CPU and memory. cAdvisor reads the Docker daemon's own
+  # counters, so the application needs no extra instrumentation.
+  # ---------------------------------------------------------------------------
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.49.1
+    container_name: fuel-cadvisor
+    restart: unless-stopped
+    mem_limit: ${CADVISOR_MEM_LIMIT:-384m}
+    cpus: ${CADVISOR_CPUS:-0.5}
+    pids_limit: 128
+    logging: *default-logging
+    profiles: ["observability"]
+    privileged: true
+    command:
+      - "-docker_only=true"
+      - "-housekeeping_interval=15s"
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    ports:
+      - "${CADVISOR_PORT:-8080}:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/healthz || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
 
 volumes:
   simulator-data:

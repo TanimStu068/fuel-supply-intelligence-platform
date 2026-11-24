@@ -1,0 +1,3266 @@
+[
+  {
+    "name": "dashboard",
+    "title": "The dashboard's read path",
+    "description": "Ten endpoints, the way the operator's dashboard polls them. This is the read path that every open browser tab drives.",
+    "started_at": "2026-11-24T11:45:19.897098+00:00",
+    "finished_at": "2026-11-24T11:46:54.414106+00:00",
+    "elapsed_seconds": 94.52,
+    "requests": 31700,
+    "throughput_rps": 335.39,
+    "error_rate": 0.0,
+    "conflicts": 0,
+    "latency": {
+      "count": 31700,
+      "average_ms": 66.05,
+      "p50_ms": 53.24,
+      "p95_ms": 196.8,
+      "p99_ms": 286.13,
+      "min_ms": 0.83,
+      "max_ms": 527.53
+    },
+    "stages": [
+      {
+        "users": 1,
+        "seconds": 15,
+        "requests": 2500,
+        "rps": 155.97,
+        "p50_ms": 2.06,
+        "p95_ms": 20.77,
+        "p99_ms": 86.74,
+        "errors": 0
+      },
+      {
+        "users": 5,
+        "seconds": 20,
+        "requests": 6022,
+        "rps": 285.11,
+        "p50_ms": 9.13,
+        "p95_ms": 70.39,
+        "p99_ms": 134.64,
+        "errors": 0
+      },
+      {
+        "users": 20,
+        "seconds": 25,
+        "requests": 10123,
+        "rps": 387.95,
+        "p50_ms": 34.18,
+        "p95_ms": 130.27,
+        "p99_ms": 195.41,
+        "errors": 0
+      },
+      {
+        "users": 50,
+        "seconds": 30,
+        "requests": 13055,
+        "rps": 417.62,
+        "p50_ms": 88.77,
+        "p95_ms": 251.27,
+        "p99_ms": 326.93,
+        "errors": 0
+      }
+    ],
+    "by_endpoint": [
+      {
+        "endpoint": "/api/service-health",
+        "requests": 3145,
+        "average_ms": 138.96,
+        "p50_ms": 125.09,
+        "p95_ms": 302.42,
+        "p99_ms": 382.44,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/alerts",
+        "requests": 3171,
+        "average_ms": 118.73,
+        "p50_ms": 97.63,
+        "p95_ms": 269.47,
+        "p99_ms": 328.06,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations",
+        "requests": 3167,
+        "average_ms": 60.7,
+        "p50_ms": 47.81,
+        "p95_ms": 152.53,
+        "p99_ms": 188.2,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/risk",
+        "requests": 3175,
+        "average_ms": 50.14,
+        "p50_ms": 34.46,
+        "p95_ms": 138.14,
+        "p99_ms": 177.77,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/events",
+        "requests": 3161,
+        "average_ms": 52.51,
+        "p50_ms": 39.61,
+        "p95_ms": 134.64,
+        "p99_ms": 172.91,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/stations",
+        "requests": 3200,
+        "average_ms": 48.74,
+        "p50_ms": 41.74,
+        "p95_ms": 133.54,
+        "p99_ms": 177.27,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/routes",
+        "requests": 3180,
+        "average_ms": 47.61,
+        "p50_ms": 33.86,
+        "p95_ms": 130.61,
+        "p99_ms": 170.72,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/depots",
+        "requests": 3191,
+        "average_ms": 46.89,
+        "p50_ms": 36.68,
+        "p95_ms": 130.59,
+        "p99_ms": 163.88,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/supply-arrivals",
+        "requests": 3156,
+        "average_ms": 49.72,
+        "p50_ms": 36.5,
+        "p95_ms": 128.84,
+        "p99_ms": 165.44,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/allocations",
+        "requests": 3154,
+        "average_ms": 47.22,
+        "p50_ms": 33.36,
+        "p95_ms": 115.94,
+        "p99_ms": 164.78,
+        "error_rate": 0.0
+      }
+    ],
+    "container_cpu_cores": [
+      0.06035000000000001,
+      0.051666666666666666,
+      0.051958333333333336,
+      0.05590833333333334
+    ],
+    "container_memory_bytes": [
+      93165977.6,
+      96898908.16,
+      98849259.52,
+      102194216.96
+    ],
+    "host_load_average": [
+      3.43994140625,
+      3.251953125,
+      3.22900390625,
+      5.40478515625
+    ]
+  },
+  {
+    "name": "recommendation",
+    "title": "The recommendation read path",
+    "description": "The endpoint that carries the whole recommendation payload: the world model, the risk scores and the alternatives.",
+    "started_at": "2026-11-24T11:46:54.431384+00:00",
+    "finished_at": "2026-11-24T11:48:29.004303+00:00",
+    "elapsed_seconds": 94.57,
+    "requests": 12595,
+    "throughput_rps": 133.18,
+    "error_rate": 0.0,
+    "conflicts": 0,
+    "latency": {
+      "count": 12595,
+      "average_ms": 166.28,
+      "p50_ms": 124.36,
+      "p95_ms": 327.79,
+      "p99_ms": 382.83,
+      "min_ms": 4.31,
+      "max_ms": 1062.58
+    },
+    "stages": [
+      {
+        "users": 1,
+        "seconds": 15,
+        "requests": 1307,
+        "rps": 81.52,
+        "p50_ms": 8.15,
+        "p95_ms": 28.74,
+        "p99_ms": 97.5,
+        "errors": 0
+      },
+      {
+        "users": 5,
+        "seconds": 20,
+        "requests": 2494,
+        "rps": 118.18,
+        "p50_ms": 34.46,
+        "p95_ms": 83.57,
+        "p99_ms": 156.85,
+        "errors": 0
+      },
+      {
+        "users": 20,
+        "seconds": 25,
+        "requests": 3878,
+        "rps": 148.4,
+        "p50_ms": 121.1,
+        "p95_ms": 182.41,
+        "p99_ms": 199.61,
+        "errors": 0
+      },
+      {
+        "users": 50,
+        "seconds": 30,
+        "requests": 4916,
+        "rps": 157.06,
+        "p50_ms": 292.72,
+        "p95_ms": 365.04,
+        "p99_ms": 491.53,
+        "errors": 0
+      }
+    ],
+    "by_endpoint": [
+      {
+        "endpoint": "/api/recommendations",
+        "requests": 12595,
+        "average_ms": 166.28,
+        "p50_ms": 124.36,
+        "p95_ms": 327.79,
+        "p99_ms": 382.83,
+        "error_rate": 0.0
+      }
+    ],
+    "container_cpu_cores": [
+      0.04210833333333333,
+      0.05253333333333333,
+      0.056174999999999996,
+      0.04736666666666667
+    ],
+    "container_memory_bytes": [
+      99950264.32,
+      99300147.2,
+      99363061.76,
+      99541319.68
+    ],
+    "host_load_average": [
+      4.8837890625,
+      4.26806640625,
+      4.3984375,
+      3.93798828125
+    ]
+  },
+  {
+    "name": "decision",
+    "title": "An end-to-end decision request",
+    "description": "Propose allocations, approve one, and let the platform submit it to the simulator. The only workload that writes.",
+    "started_at": "2026-11-24T11:48:29.008176+00:00",
+    "finished_at": "2026-11-24T11:50:04.458900+00:00",
+    "elapsed_seconds": 95.45,
+    "requests": 6768,
+    "throughput_rps": 70.91,
+    "error_rate": 0.0,
+    "conflicts": 2619,
+    "latency": {
+      "count": 4149,
+      "average_ms": 210.24,
+      "p50_ms": 149.77,
+      "p95_ms": 416.64,
+      "p99_ms": 985.85,
+      "min_ms": 4.6,
+      "max_ms": 3480.65
+    },
+    "stages": [
+      {
+        "users": 1,
+        "seconds": 15,
+        "requests": 280,
+        "rps": 17.44,
+        "p50_ms": 17.72,
+        "p95_ms": 156.29,
+        "p99_ms": 322.31,
+        "errors": 0
+      },
+      {
+        "users": 5,
+        "seconds": 20,
+        "requests": 954,
+        "rps": 45.14,
+        "p50_ms": 56.73,
+        "p95_ms": 339.16,
+        "p99_ms": 1017.08,
+        "errors": 206
+      },
+      {
+        "users": 20,
+        "seconds": 25,
+        "requests": 2614,
+        "rps": 99.59,
+        "p50_ms": 117.29,
+        "p95_ms": 257.12,
+        "p99_ms": 335.12,
+        "errors": 1161
+      },
+      {
+        "users": 50,
+        "seconds": 30,
+        "requests": 2920,
+        "rps": 91.22,
+        "p50_ms": 287.72,
+        "p95_ms": 537.33,
+        "p99_ms": 3412.17,
+        "errors": 1252
+      }
+    ],
+    "by_endpoint": [
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-30705-2504-1/approve",
+        "requests": 28,
+        "average_ms": 134.64,
+        "p50_ms": 63.28,
+        "p95_ms": 1310.07,
+        "p99_ms": 1310.07,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-30705-6000/approve",
+        "requests": 7,
+        "average_ms": 249.27,
+        "p50_ms": 65.6,
+        "p95_ms": 1076.38,
+        "p99_ms": 1076.38,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-karnaphuli-DIESEL-30722-4000-1/approve",
+        "requests": 34,
+        "average_ms": 176.01,
+        "p50_ms": 66.5,
+        "p95_ms": 985.85,
+        "p99_ms": 1017.08,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29300-6000/approve",
+        "requests": 17,
+        "average_ms": 895.81,
+        "p50_ms": 895.81,
+        "p95_ms": 895.81,
+        "p99_ms": 895.81,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29257-6000/approve",
+        "requests": 16,
+        "average_ms": 866.43,
+        "p50_ms": 866.43,
+        "p95_ms": 866.43,
+        "p99_ms": 866.43,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29268-1714-1/approve",
+        "requests": 20,
+        "average_ms": 839.31,
+        "p50_ms": 839.31,
+        "p95_ms": 839.31,
+        "p99_ms": 839.31,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29257-1716-1/approve",
+        "requests": 27,
+        "average_ms": 787.81,
+        "p50_ms": 787.81,
+        "p95_ms": 787.81,
+        "p99_ms": 787.81,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29279-2071-1/approve",
+        "requests": 21,
+        "average_ms": 747.17,
+        "p50_ms": 747.17,
+        "p95_ms": 747.17,
+        "p99_ms": 747.17,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29251-1138-1/approve",
+        "requests": 27,
+        "average_ms": 729.84,
+        "p50_ms": 729.84,
+        "p95_ms": 729.84,
+        "p99_ms": 729.84,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29357-6000/approve",
+        "requests": 21,
+        "average_ms": 710.53,
+        "p50_ms": 710.53,
+        "p95_ms": 710.53,
+        "p99_ms": 710.53,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29334-6000/approve",
+        "requests": 18,
+        "average_ms": 697.54,
+        "p50_ms": 697.54,
+        "p95_ms": 697.54,
+        "p99_ms": 697.54,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29246-1587-1/approve",
+        "requests": 21,
+        "average_ms": 692.24,
+        "p50_ms": 692.24,
+        "p95_ms": 692.24,
+        "p99_ms": 692.24,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29300-2033-1/approve",
+        "requests": 19,
+        "average_ms": 687.01,
+        "p50_ms": 687.01,
+        "p95_ms": 687.01,
+        "p99_ms": 687.01,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29351-6000/approve",
+        "requests": 19,
+        "average_ms": 684.57,
+        "p50_ms": 684.57,
+        "p95_ms": 684.57,
+        "p99_ms": 684.57,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29194-2125-1/approve",
+        "requests": 18,
+        "average_ms": 677.08,
+        "p50_ms": 677.08,
+        "p95_ms": 677.08,
+        "p99_ms": 677.08,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29268-6000/approve",
+        "requests": 17,
+        "average_ms": 675.47,
+        "p50_ms": 675.47,
+        "p95_ms": 675.47,
+        "p99_ms": 675.47,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29202-6000/approve",
+        "requests": 21,
+        "average_ms": 668.17,
+        "p50_ms": 668.17,
+        "p95_ms": 668.17,
+        "p99_ms": 668.17,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29305-6000/approve",
+        "requests": 26,
+        "average_ms": 665.4,
+        "p50_ms": 665.4,
+        "p95_ms": 665.4,
+        "p99_ms": 665.4,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29323-6000/approve",
+        "requests": 26,
+        "average_ms": 661.78,
+        "p50_ms": 661.78,
+        "p95_ms": 661.78,
+        "p99_ms": 661.78,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29262-6000/approve",
+        "requests": 15,
+        "average_ms": 653.21,
+        "p50_ms": 653.21,
+        "p95_ms": 653.21,
+        "p99_ms": 653.21,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29284-6000/approve",
+        "requests": 17,
+        "average_ms": 645.81,
+        "p50_ms": 645.81,
+        "p95_ms": 645.81,
+        "p99_ms": 645.81,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29194-6000/approve",
+        "requests": 21,
+        "average_ms": 645.44,
+        "p50_ms": 645.44,
+        "p95_ms": 645.44,
+        "p99_ms": 645.44,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29274-2120-1/approve",
+        "requests": 21,
+        "average_ms": 644.18,
+        "p50_ms": 644.18,
+        "p95_ms": 644.18,
+        "p99_ms": 644.18,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29334-1333-1/approve",
+        "requests": 17,
+        "average_ms": 643.7,
+        "p50_ms": 643.7,
+        "p95_ms": 643.7,
+        "p99_ms": 643.7,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29284-1997-1/approve",
+        "requests": 25,
+        "average_ms": 643.17,
+        "p50_ms": 643.17,
+        "p95_ms": 643.17,
+        "p99_ms": 643.17,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29363-6000/approve",
+        "requests": 21,
+        "average_ms": 640.88,
+        "p50_ms": 640.88,
+        "p95_ms": 640.88,
+        "p99_ms": 640.88,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29351-1550-1/approve",
+        "requests": 18,
+        "average_ms": 639.67,
+        "p50_ms": 639.67,
+        "p95_ms": 639.67,
+        "p99_ms": 639.67,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29295-2203-1/approve",
+        "requests": 24,
+        "average_ms": 635.48,
+        "p50_ms": 635.48,
+        "p95_ms": 635.48,
+        "p99_ms": 635.48,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29317-1728-1/approve",
+        "requests": 23,
+        "average_ms": 633.45,
+        "p50_ms": 633.45,
+        "p95_ms": 633.45,
+        "p99_ms": 633.45,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29357-1838-1/approve",
+        "requests": 24,
+        "average_ms": 627.75,
+        "p50_ms": 627.75,
+        "p95_ms": 627.75,
+        "p99_ms": 627.75,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29202-1450-1/approve",
+        "requests": 20,
+        "average_ms": 622.29,
+        "p50_ms": 622.29,
+        "p95_ms": 622.29,
+        "p99_ms": 622.29,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29212-1866-1/approve",
+        "requests": 21,
+        "average_ms": 615.74,
+        "p50_ms": 615.74,
+        "p95_ms": 615.74,
+        "p99_ms": 615.74,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29311-6000/approve",
+        "requests": 33,
+        "average_ms": 608.1,
+        "p50_ms": 608.1,
+        "p95_ms": 608.1,
+        "p99_ms": 608.1,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29224-6000/approve",
+        "requests": 29,
+        "average_ms": 607.49,
+        "p50_ms": 607.49,
+        "p95_ms": 607.49,
+        "p99_ms": 607.49,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29317-6000/approve",
+        "requests": 20,
+        "average_ms": 597.46,
+        "p50_ms": 597.46,
+        "p95_ms": 597.46,
+        "p99_ms": 597.46,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29229-1720-1/approve",
+        "requests": 20,
+        "average_ms": 597.07,
+        "p50_ms": 597.07,
+        "p95_ms": 597.07,
+        "p99_ms": 597.07,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29207-1693-1/approve",
+        "requests": 20,
+        "average_ms": 593.1,
+        "p50_ms": 593.1,
+        "p95_ms": 593.1,
+        "p99_ms": 593.1,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29262-1626-1/approve",
+        "requests": 18,
+        "average_ms": 590.94,
+        "p50_ms": 590.94,
+        "p95_ms": 590.94,
+        "p99_ms": 590.94,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29224-1810-1/approve",
+        "requests": 34,
+        "average_ms": 583.86,
+        "p50_ms": 583.86,
+        "p95_ms": 583.86,
+        "p99_ms": 583.86,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29207-6000/approve",
+        "requests": 17,
+        "average_ms": 570.11,
+        "p50_ms": 570.11,
+        "p95_ms": 570.11,
+        "p99_ms": 570.11,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29274-6000/approve",
+        "requests": 21,
+        "average_ms": 568.72,
+        "p50_ms": 568.72,
+        "p95_ms": 568.72,
+        "p99_ms": 568.72,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29218-2277-1/approve",
+        "requests": 17,
+        "average_ms": 551.58,
+        "p50_ms": 551.58,
+        "p95_ms": 551.58,
+        "p99_ms": 551.58,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29212-6000/approve",
+        "requests": 18,
+        "average_ms": 550.96,
+        "p50_ms": 550.96,
+        "p95_ms": 550.96,
+        "p99_ms": 550.96,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29363-1904-1/approve",
+        "requests": 16,
+        "average_ms": 549.92,
+        "p50_ms": 549.92,
+        "p95_ms": 549.92,
+        "p99_ms": 549.92,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29328-1791-1/approve",
+        "requests": 23,
+        "average_ms": 541.2,
+        "p50_ms": 541.2,
+        "p95_ms": 541.2,
+        "p99_ms": 541.2,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29328-6000/approve",
+        "requests": 16,
+        "average_ms": 539.95,
+        "p50_ms": 539.95,
+        "p95_ms": 539.95,
+        "p99_ms": 539.95,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29345-6000/approve",
+        "requests": 20,
+        "average_ms": 539.19,
+        "p50_ms": 539.19,
+        "p95_ms": 539.19,
+        "p99_ms": 539.19,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29305-1889-1/approve",
+        "requests": 15,
+        "average_ms": 537.33,
+        "p50_ms": 537.33,
+        "p95_ms": 537.33,
+        "p99_ms": 537.33,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29323-1546-1/approve",
+        "requests": 23,
+        "average_ms": 534.34,
+        "p50_ms": 534.34,
+        "p95_ms": 534.34,
+        "p99_ms": 534.34,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29311-1765-1/approve",
+        "requests": 24,
+        "average_ms": 533.1,
+        "p50_ms": 533.1,
+        "p95_ms": 533.1,
+        "p99_ms": 533.1,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29235-6000/approve",
+        "requests": 17,
+        "average_ms": 527.05,
+        "p50_ms": 527.05,
+        "p95_ms": 527.05,
+        "p99_ms": 527.05,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29290-6000/approve",
+        "requests": 23,
+        "average_ms": 514.82,
+        "p50_ms": 514.82,
+        "p95_ms": 514.82,
+        "p99_ms": 514.82,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29251-6000/approve",
+        "requests": 20,
+        "average_ms": 507.36,
+        "p50_ms": 507.36,
+        "p95_ms": 507.36,
+        "p99_ms": 507.36,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29279-6000/approve",
+        "requests": 21,
+        "average_ms": 506.62,
+        "p50_ms": 506.62,
+        "p95_ms": 506.62,
+        "p99_ms": 506.62,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29229-6000/approve",
+        "requests": 20,
+        "average_ms": 496.56,
+        "p50_ms": 496.56,
+        "p95_ms": 496.56,
+        "p99_ms": 496.56,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29339-6000/approve",
+        "requests": 20,
+        "average_ms": 487.59,
+        "p50_ms": 487.59,
+        "p95_ms": 487.59,
+        "p99_ms": 487.59,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29240-6000/approve",
+        "requests": 19,
+        "average_ms": 485.65,
+        "p50_ms": 485.65,
+        "p95_ms": 485.65,
+        "p99_ms": 485.65,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29218-6000/approve",
+        "requests": 27,
+        "average_ms": 479.53,
+        "p50_ms": 479.53,
+        "p95_ms": 479.53,
+        "p99_ms": 479.53,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29235-2446-1/approve",
+        "requests": 20,
+        "average_ms": 475.74,
+        "p50_ms": 475.74,
+        "p95_ms": 475.74,
+        "p99_ms": 475.74,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-30059-1668-1/approve",
+        "requests": 8,
+        "average_ms": 467.83,
+        "p50_ms": 467.83,
+        "p95_ms": 467.83,
+        "p99_ms": 467.83,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29240-1966-1/approve",
+        "requests": 29,
+        "average_ms": 452.94,
+        "p50_ms": 452.94,
+        "p95_ms": 452.94,
+        "p99_ms": 452.94,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29290-1931-1/approve",
+        "requests": 22,
+        "average_ms": 450.16,
+        "p50_ms": 450.16,
+        "p95_ms": 450.16,
+        "p99_ms": 450.16,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29295-6000/approve",
+        "requests": 25,
+        "average_ms": 438.89,
+        "p50_ms": 438.89,
+        "p95_ms": 438.89,
+        "p99_ms": 438.89,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-OCTANE-30790-626/approve",
+        "requests": 33,
+        "average_ms": 94.51,
+        "p50_ms": 63.56,
+        "p95_ms": 431.47,
+        "p99_ms": 431.47,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-30052-1358-1/approve",
+        "requests": 10,
+        "average_ms": 429.31,
+        "p50_ms": 429.31,
+        "p95_ms": 429.31,
+        "p99_ms": 429.31,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-karnaphuli-OCTANE-30776-1294/approve",
+        "requests": 30,
+        "average_ms": 91.08,
+        "p50_ms": 61.0,
+        "p95_ms": 420.29,
+        "p99_ms": 420.29,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29339-2367-1/approve",
+        "requests": 20,
+        "average_ms": 420.01,
+        "p50_ms": 420.01,
+        "p95_ms": 420.01,
+        "p99_ms": 420.01,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-30124-6000/approve",
+        "requests": 10,
+        "average_ms": 419.99,
+        "p50_ms": 419.99,
+        "p95_ms": 419.99,
+        "p99_ms": 419.99,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-OCTANE-30804-288/approve",
+        "requests": 35,
+        "average_ms": 107.91,
+        "p50_ms": 70.15,
+        "p95_ms": 413.38,
+        "p99_ms": 477.53,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-mirpur-DIESEL-30776-2959/approve",
+        "requests": 17,
+        "average_ms": 108.94,
+        "p50_ms": 61.32,
+        "p95_ms": 403.16,
+        "p99_ms": 403.16,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/propose",
+        "requests": 3529,
+        "average_ms": 215.14,
+        "p50_ms": 156.29,
+        "p95_ms": 400.74,
+        "p99_ms": 1074.28,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-30059-6000/approve",
+        "requests": 9,
+        "average_ms": 390.04,
+        "p50_ms": 390.04,
+        "p95_ms": 390.04,
+        "p99_ms": 390.04,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29345-2318-1/approve",
+        "requests": 25,
+        "average_ms": 386.24,
+        "p50_ms": 386.24,
+        "p95_ms": 386.24,
+        "p99_ms": 386.24,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-30598-6000/approve",
+        "requests": 3,
+        "average_ms": 386.09,
+        "p50_ms": 386.09,
+        "p95_ms": 386.09,
+        "p99_ms": 386.09,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-karnaphuli-DIESEL-30722-7000/approve",
+        "requests": 16,
+        "average_ms": 85.58,
+        "p50_ms": 59.48,
+        "p95_ms": 384.68,
+        "p99_ms": 384.68,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29564-1713-1/approve",
+        "requests": 6,
+        "average_ms": 381.94,
+        "p50_ms": 381.94,
+        "p95_ms": 381.94,
+        "p99_ms": 381.94,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29540-6000/approve",
+        "requests": 11,
+        "average_ms": 366.57,
+        "p50_ms": 366.57,
+        "p95_ms": 366.57,
+        "p99_ms": 366.57,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29795-6000/approve",
+        "requests": 10,
+        "average_ms": 365.29,
+        "p50_ms": 365.29,
+        "p95_ms": 365.29,
+        "p99_ms": 365.29,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-OCTANE-30722-3773/approve",
+        "requests": 4,
+        "average_ms": 263.54,
+        "p50_ms": 171.31,
+        "p95_ms": 355.77,
+        "p99_ms": 355.77,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-30655-1860-1/approve",
+        "requests": 8,
+        "average_ms": 74.77,
+        "p50_ms": 58.42,
+        "p95_ms": 349.58,
+        "p99_ms": 349.58,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29564-6000/approve",
+        "requests": 13,
+        "average_ms": 349.51,
+        "p50_ms": 349.51,
+        "p95_ms": 349.51,
+        "p99_ms": 349.51,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29381-1696-1/approve",
+        "requests": 9,
+        "average_ms": 343.92,
+        "p50_ms": 343.92,
+        "p95_ms": 343.92,
+        "p99_ms": 343.92,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29650-1896-1/approve",
+        "requests": 6,
+        "average_ms": 343.04,
+        "p50_ms": 343.04,
+        "p95_ms": 343.04,
+        "p99_ms": 343.04,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29795-1772-1/approve",
+        "requests": 10,
+        "average_ms": 341.82,
+        "p50_ms": 341.82,
+        "p95_ms": 341.82,
+        "p99_ms": 341.82,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29650-6000/approve",
+        "requests": 9,
+        "average_ms": 339.86,
+        "p50_ms": 339.86,
+        "p95_ms": 339.86,
+        "p99_ms": 339.86,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-PETROL-30760-2479-1/approve",
+        "requests": 33,
+        "average_ms": 95.82,
+        "p50_ms": 73.18,
+        "p95_ms": 339.16,
+        "p99_ms": 365.72,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29246-6000/approve",
+        "requests": 19,
+        "average_ms": 338.44,
+        "p50_ms": 338.44,
+        "p95_ms": 338.44,
+        "p99_ms": 338.44,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29407-6000/approve",
+        "requests": 7,
+        "average_ms": 337.65,
+        "p50_ms": 337.65,
+        "p95_ms": 337.65,
+        "p99_ms": 337.65,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29727-6000/approve",
+        "requests": 9,
+        "average_ms": 335.93,
+        "p50_ms": 335.93,
+        "p95_ms": 335.93,
+        "p99_ms": 335.93,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29863-1609-1/approve",
+        "requests": 10,
+        "average_ms": 335.12,
+        "p50_ms": 335.12,
+        "p95_ms": 335.12,
+        "p99_ms": 335.12,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-30594-1840-1/approve",
+        "requests": 2,
+        "average_ms": 332.87,
+        "p50_ms": 332.87,
+        "p95_ms": 332.87,
+        "p99_ms": 332.87,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-30066-6000/approve",
+        "requests": 7,
+        "average_ms": 330.92,
+        "p50_ms": 330.92,
+        "p95_ms": 330.92,
+        "p99_ms": 330.92,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29400-2067-1/approve",
+        "requests": 8,
+        "average_ms": 328.21,
+        "p50_ms": 328.21,
+        "p95_ms": 328.21,
+        "p99_ms": 328.21,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29540-2278-1/approve",
+        "requests": 9,
+        "average_ms": 328.03,
+        "p50_ms": 328.03,
+        "p95_ms": 328.03,
+        "p99_ms": 328.03,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-mirpur-OCTANE-30689-336-1/approve",
+        "requests": 9,
+        "average_ms": 57.63,
+        "p50_ms": 17.13,
+        "p95_ms": 326.19,
+        "p99_ms": 326.19,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-mirpur-OCTANE-30639-164-1/approve",
+        "requests": 9,
+        "average_ms": 60.87,
+        "p50_ms": 18.26,
+        "p95_ms": 322.31,
+        "p99_ms": 322.31,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29969-6000/approve",
+        "requests": 6,
+        "average_ms": 320.43,
+        "p50_ms": 320.43,
+        "p95_ms": 320.43,
+        "p99_ms": 320.43,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29587-1874-1/approve",
+        "requests": 9,
+        "average_ms": 319.56,
+        "p50_ms": 319.56,
+        "p95_ms": 319.56,
+        "p99_ms": 319.56,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-karnaphuli-OCTANE-30672-3287/approve",
+        "requests": 9,
+        "average_ms": 56.37,
+        "p50_ms": 17.06,
+        "p95_ms": 319.51,
+        "p99_ms": 319.51,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29996-1955-1/approve",
+        "requests": 10,
+        "average_ms": 317.39,
+        "p50_ms": 317.39,
+        "p95_ms": 317.39,
+        "p99_ms": 317.39,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-mirpur-DIESEL-30631-3070-1/approve",
+        "requests": 10,
+        "average_ms": 59.4,
+        "p50_ms": 17.28,
+        "p95_ms": 316.14,
+        "p99_ms": 316.14,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-PETROL-30680-2218-1/approve",
+        "requests": 10,
+        "average_ms": 56.96,
+        "p50_ms": 19.58,
+        "p95_ms": 315.64,
+        "p99_ms": 315.64,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-30030-2170-1/approve",
+        "requests": 11,
+        "average_ms": 313.96,
+        "p50_ms": 313.96,
+        "p95_ms": 313.96,
+        "p99_ms": 313.96,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-30203-6000/approve",
+        "requests": 8,
+        "average_ms": 308.48,
+        "p50_ms": 308.48,
+        "p95_ms": 308.48,
+        "p99_ms": 308.48,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29696-6000/approve",
+        "requests": 10,
+        "average_ms": 302.66,
+        "p50_ms": 302.66,
+        "p95_ms": 302.66,
+        "p99_ms": 302.66,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-30052-6000/approve",
+        "requests": 10,
+        "average_ms": 302.53,
+        "p50_ms": 302.53,
+        "p95_ms": 302.53,
+        "p99_ms": 302.53,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29773-6000/approve",
+        "requests": 12,
+        "average_ms": 302.43,
+        "p50_ms": 302.43,
+        "p95_ms": 302.43,
+        "p99_ms": 302.43,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29996-6000/approve",
+        "requests": 8,
+        "average_ms": 302.32,
+        "p50_ms": 302.32,
+        "p95_ms": 302.32,
+        "p99_ms": 302.32,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-30183-6000/approve",
+        "requests": 7,
+        "average_ms": 301.31,
+        "p50_ms": 301.31,
+        "p95_ms": 301.31,
+        "p99_ms": 301.31,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29388-6000/approve",
+        "requests": 8,
+        "average_ms": 301.21,
+        "p50_ms": 301.21,
+        "p95_ms": 301.21,
+        "p99_ms": 301.21,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29433-6000/approve",
+        "requests": 9,
+        "average_ms": 298.26,
+        "p50_ms": 298.26,
+        "p95_ms": 298.26,
+        "p99_ms": 298.26,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-30124-2266-1/approve",
+        "requests": 8,
+        "average_ms": 297.43,
+        "p50_ms": 297.43,
+        "p95_ms": 297.43,
+        "p99_ms": 297.43,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29491-6000/approve",
+        "requests": 8,
+        "average_ms": 295.3,
+        "p50_ms": 295.3,
+        "p95_ms": 295.3,
+        "p99_ms": 295.3,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-30073-6000/approve",
+        "requests": 9,
+        "average_ms": 295.1,
+        "p50_ms": 295.1,
+        "p95_ms": 295.1,
+        "p99_ms": 295.1,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29491-1980-1/approve",
+        "requests": 10,
+        "average_ms": 293.08,
+        "p50_ms": 293.08,
+        "p95_ms": 293.08,
+        "p99_ms": 293.08,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-30003-6000/approve",
+        "requests": 10,
+        "average_ms": 290.56,
+        "p50_ms": 290.56,
+        "p95_ms": 290.56,
+        "p99_ms": 290.56,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-mirpur-OCTANE-30663-97-1/approve",
+        "requests": 11,
+        "average_ms": 47.02,
+        "p50_ms": 17.72,
+        "p95_ms": 290.22,
+        "p99_ms": 290.22,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-30106-1697-1/approve",
+        "requests": 6,
+        "average_ms": 288.76,
+        "p50_ms": 288.76,
+        "p95_ms": 288.76,
+        "p99_ms": 288.76,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29499-1804-1/approve",
+        "requests": 10,
+        "average_ms": 287.37,
+        "p50_ms": 287.37,
+        "p95_ms": 287.37,
+        "p99_ms": 287.37,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-30078-1715-1/approve",
+        "requests": 8,
+        "average_ms": 287.05,
+        "p50_ms": 287.05,
+        "p95_ms": 287.05,
+        "p99_ms": 287.05,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-mirpur-PETROL-30647-259-2/approve",
+        "requests": 9,
+        "average_ms": 65.0,
+        "p50_ms": 40.92,
+        "p95_ms": 286.34,
+        "p99_ms": 286.34,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-karnaphuli-OCTANE-30615-2901/approve",
+        "requests": 9,
+        "average_ms": 55.26,
+        "p50_ms": 19.89,
+        "p95_ms": 285.33,
+        "p99_ms": 285.33,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-30183-1220-1/approve",
+        "requests": 12,
+        "average_ms": 285.17,
+        "p50_ms": 285.17,
+        "p95_ms": 285.17,
+        "p99_ms": 285.17,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29711-2311-1/approve",
+        "requests": 11,
+        "average_ms": 282.82,
+        "p50_ms": 282.82,
+        "p95_ms": 282.82,
+        "p99_ms": 282.82,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-30003-1670-1/approve",
+        "requests": 10,
+        "average_ms": 281.37,
+        "p50_ms": 281.37,
+        "p95_ms": 281.37,
+        "p99_ms": 281.37,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-30045-1370-1/approve",
+        "requests": 9,
+        "average_ms": 278.65,
+        "p50_ms": 278.65,
+        "p95_ms": 278.65,
+        "p99_ms": 278.65,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29572-6000/approve",
+        "requests": 10,
+        "average_ms": 277.23,
+        "p50_ms": 277.23,
+        "p95_ms": 277.23,
+        "p99_ms": 277.23,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29635-1481-1/approve",
+        "requests": 7,
+        "average_ms": 276.89,
+        "p50_ms": 276.89,
+        "p95_ms": 276.89,
+        "p99_ms": 276.89,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29507-6000/approve",
+        "requests": 9,
+        "average_ms": 274.44,
+        "p50_ms": 274.44,
+        "p95_ms": 274.44,
+        "p99_ms": 274.44,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-30594-6000/approve",
+        "requests": 2,
+        "average_ms": 274.04,
+        "p50_ms": 274.04,
+        "p95_ms": 274.04,
+        "p99_ms": 274.04,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29905-1903-1/approve",
+        "requests": 8,
+        "average_ms": 273.01,
+        "p50_ms": 273.01,
+        "p95_ms": 273.01,
+        "p99_ms": 273.01,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29450-6000/approve",
+        "requests": 12,
+        "average_ms": 271.9,
+        "p50_ms": 271.9,
+        "p95_ms": 271.9,
+        "p99_ms": 271.9,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29826-1946-1/approve",
+        "requests": 8,
+        "average_ms": 271.62,
+        "p50_ms": 271.62,
+        "p95_ms": 271.62,
+        "p99_ms": 271.62,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29394-1919-1/approve",
+        "requests": 10,
+        "average_ms": 270.85,
+        "p50_ms": 270.85,
+        "p95_ms": 270.85,
+        "p99_ms": 270.85,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-30038-6000/approve",
+        "requests": 10,
+        "average_ms": 270.47,
+        "p50_ms": 270.47,
+        "p95_ms": 270.47,
+        "p99_ms": 270.47,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-karnaphuli-PETROL-30623-4000-1/approve",
+        "requests": 12,
+        "average_ms": 56.09,
+        "p50_ms": 22.09,
+        "p95_ms": 269.32,
+        "p99_ms": 269.32,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29548-6000/approve",
+        "requests": 8,
+        "average_ms": 266.6,
+        "p50_ms": 266.6,
+        "p95_ms": 266.6,
+        "p99_ms": 266.6,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-30024-1891-1/approve",
+        "requests": 13,
+        "average_ms": 265.93,
+        "p50_ms": 265.93,
+        "p95_ms": 265.93,
+        "p99_ms": 265.93,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29635-6000/approve",
+        "requests": 7,
+        "average_ms": 265.8,
+        "p50_ms": 265.8,
+        "p95_ms": 265.8,
+        "p99_ms": 265.8,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29905-6000/approve",
+        "requests": 12,
+        "average_ms": 263.2,
+        "p50_ms": 263.2,
+        "p95_ms": 263.2,
+        "p99_ms": 263.2,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29524-6000/approve",
+        "requests": 13,
+        "average_ms": 262.52,
+        "p50_ms": 262.52,
+        "p95_ms": 262.52,
+        "p99_ms": 262.52,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29465-6000/approve",
+        "requests": 11,
+        "average_ms": 262.41,
+        "p50_ms": 262.41,
+        "p95_ms": 262.41,
+        "p99_ms": 262.41,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29696-1491-1/approve",
+        "requests": 8,
+        "average_ms": 261.51,
+        "p50_ms": 261.51,
+        "p95_ms": 261.51,
+        "p99_ms": 261.51,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29375-1492-1/approve",
+        "requests": 9,
+        "average_ms": 260.64,
+        "p50_ms": 260.64,
+        "p95_ms": 260.64,
+        "p99_ms": 260.64,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29457-6000/approve",
+        "requests": 10,
+        "average_ms": 259.51,
+        "p50_ms": 259.51,
+        "p95_ms": 259.51,
+        "p99_ms": 259.51,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-karnaphuli-DIESEL-30608-3260-1/approve",
+        "requests": 8,
+        "average_ms": 58.42,
+        "p50_ms": 28.04,
+        "p95_ms": 259.42,
+        "p99_ms": 259.42,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29580-6000/approve",
+        "requests": 13,
+        "average_ms": 258.95,
+        "p50_ms": 258.95,
+        "p95_ms": 258.95,
+        "p99_ms": 258.95,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29439-1955-1/approve",
+        "requests": 10,
+        "average_ms": 258.87,
+        "p50_ms": 258.87,
+        "p95_ms": 258.87,
+        "p99_ms": 258.87,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29407-2049-1/approve",
+        "requests": 8,
+        "average_ms": 258.82,
+        "p50_ms": 258.82,
+        "p95_ms": 258.82,
+        "p99_ms": 258.82,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29742-1723-1/approve",
+        "requests": 14,
+        "average_ms": 258.8,
+        "p50_ms": 258.8,
+        "p95_ms": 258.8,
+        "p99_ms": 258.8,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29548-2366-1/approve",
+        "requests": 8,
+        "average_ms": 258.11,
+        "p50_ms": 258.11,
+        "p95_ms": 258.11,
+        "p99_ms": 258.11,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-30106-6000/approve",
+        "requests": 11,
+        "average_ms": 257.72,
+        "p50_ms": 257.72,
+        "p95_ms": 257.72,
+        "p99_ms": 257.72,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29445-6000/approve",
+        "requests": 9,
+        "average_ms": 257.43,
+        "p50_ms": 257.43,
+        "p95_ms": 257.43,
+        "p99_ms": 257.43,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29990-2075-1/approve",
+        "requests": 10,
+        "average_ms": 256.65,
+        "p50_ms": 256.65,
+        "p95_ms": 256.65,
+        "p99_ms": 256.65,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29666-1439-1/approve",
+        "requests": 7,
+        "average_ms": 255.38,
+        "p50_ms": 255.38,
+        "p95_ms": 255.38,
+        "p99_ms": 255.38,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29532-1885-1/approve",
+        "requests": 12,
+        "average_ms": 254.87,
+        "p50_ms": 254.87,
+        "p95_ms": 254.87,
+        "p99_ms": 254.87,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29381-6000/approve",
+        "requests": 6,
+        "average_ms": 254.52,
+        "p50_ms": 254.52,
+        "p95_ms": 254.52,
+        "p99_ms": 254.52,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29457-1651-1/approve",
+        "requests": 7,
+        "average_ms": 254.31,
+        "p50_ms": 254.31,
+        "p95_ms": 254.31,
+        "p99_ms": 254.31,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29400-6000/approve",
+        "requests": 7,
+        "average_ms": 251.14,
+        "p50_ms": 251.14,
+        "p95_ms": 251.14,
+        "p99_ms": 251.14,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29474-1186-1/approve",
+        "requests": 9,
+        "average_ms": 250.95,
+        "p50_ms": 250.95,
+        "p95_ms": 250.95,
+        "p99_ms": 250.95,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-30090-1670-1/approve",
+        "requests": 8,
+        "average_ms": 249.18,
+        "p50_ms": 249.18,
+        "p95_ms": 249.18,
+        "p99_ms": 249.18,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-30090-6000/approve",
+        "requests": 11,
+        "average_ms": 247.51,
+        "p50_ms": 247.51,
+        "p95_ms": 247.51,
+        "p99_ms": 247.51,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-30066-1783-1/approve",
+        "requests": 8,
+        "average_ms": 244.22,
+        "p50_ms": 244.22,
+        "p95_ms": 244.22,
+        "p99_ms": 244.22,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-mirpur-OCTANE-30672-97-1/approve",
+        "requests": 1,
+        "average_ms": 241.92,
+        "p50_ms": 241.92,
+        "p95_ms": 241.92,
+        "p99_ms": 241.92,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29433-2148-1/approve",
+        "requests": 10,
+        "average_ms": 241.84,
+        "p50_ms": 241.84,
+        "p95_ms": 241.84,
+        "p99_ms": 241.84,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29450-1472-1/approve",
+        "requests": 6,
+        "average_ms": 241.69,
+        "p50_ms": 241.69,
+        "p95_ms": 241.69,
+        "p99_ms": 241.69,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29990-6000/approve",
+        "requests": 10,
+        "average_ms": 240.47,
+        "p50_ms": 240.47,
+        "p95_ms": 240.47,
+        "p99_ms": 240.47,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29556-6000/approve",
+        "requests": 12,
+        "average_ms": 240.14,
+        "p50_ms": 240.14,
+        "p95_ms": 240.14,
+        "p99_ms": 240.14,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29482-2417-1/approve",
+        "requests": 11,
+        "average_ms": 239.75,
+        "p50_ms": 239.75,
+        "p95_ms": 239.75,
+        "p99_ms": 239.75,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29666-6000/approve",
+        "requests": 9,
+        "average_ms": 238.79,
+        "p50_ms": 238.79,
+        "p95_ms": 238.79,
+        "p99_ms": 238.79,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-30010-6000/approve",
+        "requests": 8,
+        "average_ms": 234.59,
+        "p50_ms": 234.59,
+        "p95_ms": 234.59,
+        "p99_ms": 234.59,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-30038-1875-1/approve",
+        "requests": 10,
+        "average_ms": 234.43,
+        "p50_ms": 234.43,
+        "p95_ms": 234.43,
+        "p99_ms": 234.43,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29969-1408-1/approve",
+        "requests": 9,
+        "average_ms": 234.04,
+        "p50_ms": 234.04,
+        "p95_ms": 234.04,
+        "p99_ms": 234.04,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29605-6000/approve",
+        "requests": 7,
+        "average_ms": 232.87,
+        "p50_ms": 232.87,
+        "p95_ms": 232.87,
+        "p99_ms": 232.87,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-30162-2209-1/approve",
+        "requests": 12,
+        "average_ms": 231.89,
+        "p50_ms": 231.89,
+        "p95_ms": 231.89,
+        "p99_ms": 231.89,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-30434-2126-1/approve",
+        "requests": 2,
+        "average_ms": 230.42,
+        "p50_ms": 230.42,
+        "p95_ms": 230.42,
+        "p99_ms": 230.42,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29711-6000/approve",
+        "requests": 11,
+        "average_ms": 230.09,
+        "p50_ms": 230.09,
+        "p95_ms": 230.09,
+        "p99_ms": 230.09,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29863-6000/approve",
+        "requests": 10,
+        "average_ms": 229.14,
+        "p50_ms": 229.14,
+        "p95_ms": 229.14,
+        "p99_ms": 229.14,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29757-6000/approve",
+        "requests": 7,
+        "average_ms": 228.63,
+        "p50_ms": 228.63,
+        "p95_ms": 228.63,
+        "p99_ms": 228.63,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29983-1442-1/approve",
+        "requests": 9,
+        "average_ms": 228.61,
+        "p50_ms": 228.61,
+        "p95_ms": 228.61,
+        "p99_ms": 228.61,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29681-6000/approve",
+        "requests": 9,
+        "average_ms": 228.35,
+        "p50_ms": 228.35,
+        "p95_ms": 228.35,
+        "p99_ms": 228.35,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29619-1783-1/approve",
+        "requests": 9,
+        "average_ms": 227.46,
+        "p50_ms": 227.46,
+        "p95_ms": 227.46,
+        "p99_ms": 227.46,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29414-2326-1/approve",
+        "requests": 10,
+        "average_ms": 224.17,
+        "p50_ms": 224.17,
+        "p95_ms": 224.17,
+        "p99_ms": 224.17,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29427-1342-1/approve",
+        "requests": 6,
+        "average_ms": 223.91,
+        "p50_ms": 223.91,
+        "p95_ms": 223.91,
+        "p99_ms": 223.91,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29757-1740-1/approve",
+        "requests": 8,
+        "average_ms": 222.76,
+        "p50_ms": 222.76,
+        "p95_ms": 222.76,
+        "p99_ms": 222.76,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29951-6000/approve",
+        "requests": 6,
+        "average_ms": 221.82,
+        "p50_ms": 221.82,
+        "p95_ms": 221.82,
+        "p99_ms": 221.82,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29420-1572-1/approve",
+        "requests": 11,
+        "average_ms": 221.55,
+        "p50_ms": 221.55,
+        "p95_ms": 221.55,
+        "p99_ms": 221.55,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29474-6000/approve",
+        "requests": 9,
+        "average_ms": 221.21,
+        "p50_ms": 221.21,
+        "p95_ms": 221.21,
+        "p99_ms": 221.21,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29532-6000/approve",
+        "requests": 10,
+        "average_ms": 220.75,
+        "p50_ms": 220.75,
+        "p95_ms": 220.75,
+        "p99_ms": 220.75,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29593-6000/approve",
+        "requests": 11,
+        "average_ms": 219.17,
+        "p50_ms": 219.17,
+        "p95_ms": 219.17,
+        "p99_ms": 219.17,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29482-6000/approve",
+        "requests": 6,
+        "average_ms": 218.14,
+        "p50_ms": 218.14,
+        "p95_ms": 218.14,
+        "p99_ms": 218.14,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29976-6000/approve",
+        "requests": 7,
+        "average_ms": 217.57,
+        "p50_ms": 217.57,
+        "p95_ms": 217.57,
+        "p99_ms": 217.57,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-30142-6000/approve",
+        "requests": 7,
+        "average_ms": 217.09,
+        "p50_ms": 217.09,
+        "p95_ms": 217.09,
+        "p99_ms": 217.09,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29439-6000/approve",
+        "requests": 5,
+        "average_ms": 216.88,
+        "p50_ms": 216.88,
+        "p95_ms": 216.88,
+        "p99_ms": 216.88,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-karnaphuli-OCTANE-30745-6385/approve",
+        "requests": 37,
+        "average_ms": 78.18,
+        "p50_ms": 61.02,
+        "p95_ms": 216.58,
+        "p99_ms": 326.0,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29499-6000/approve",
+        "requests": 11,
+        "average_ms": 216.53,
+        "p50_ms": 216.53,
+        "p95_ms": 216.53,
+        "p99_ms": 216.53,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29414-6000/approve",
+        "requests": 9,
+        "average_ms": 216.35,
+        "p50_ms": 216.35,
+        "p95_ms": 216.35,
+        "p99_ms": 216.35,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-30162-6000/approve",
+        "requests": 8,
+        "average_ms": 216.28,
+        "p50_ms": 216.28,
+        "p95_ms": 216.28,
+        "p99_ms": 216.28,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-30024-6000/approve",
+        "requests": 11,
+        "average_ms": 215.53,
+        "p50_ms": 215.53,
+        "p95_ms": 215.53,
+        "p99_ms": 215.53,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29763-6000/approve",
+        "requests": 11,
+        "average_ms": 213.42,
+        "p50_ms": 213.42,
+        "p95_ms": 213.42,
+        "p99_ms": 213.42,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-OCTANE-30647-4087/approve",
+        "requests": 2,
+        "average_ms": 211.64,
+        "p50_ms": 211.64,
+        "p95_ms": 211.64,
+        "p99_ms": 211.64,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29507-1692-1/approve",
+        "requests": 8,
+        "average_ms": 210.83,
+        "p50_ms": 210.83,
+        "p95_ms": 210.83,
+        "p99_ms": 210.83,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29983-6000/approve",
+        "requests": 8,
+        "average_ms": 210.23,
+        "p50_ms": 210.23,
+        "p95_ms": 210.23,
+        "p99_ms": 210.23,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-PETROL-30680-6000/approve",
+        "requests": 3,
+        "average_ms": 209.98,
+        "p50_ms": 209.98,
+        "p95_ms": 209.98,
+        "p99_ms": 209.98,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29742-6000/approve",
+        "requests": 9,
+        "average_ms": 209.18,
+        "p50_ms": 209.18,
+        "p95_ms": 209.18,
+        "p99_ms": 209.18,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29763-1536-1/approve",
+        "requests": 6,
+        "average_ms": 208.47,
+        "p50_ms": 208.47,
+        "p95_ms": 208.47,
+        "p99_ms": 208.47,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29394-6000/approve",
+        "requests": 7,
+        "average_ms": 208.0,
+        "p50_ms": 208.0,
+        "p95_ms": 208.0,
+        "p99_ms": 208.0,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-30017-6000/approve",
+        "requests": 6,
+        "average_ms": 206.79,
+        "p50_ms": 206.79,
+        "p95_ms": 206.79,
+        "p99_ms": 206.79,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-30017-1771-1/approve",
+        "requests": 10,
+        "average_ms": 205.71,
+        "p50_ms": 205.71,
+        "p95_ms": 205.71,
+        "p99_ms": 205.71,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29826-6000/approve",
+        "requests": 10,
+        "average_ms": 204.92,
+        "p50_ms": 204.92,
+        "p95_ms": 204.92,
+        "p99_ms": 204.92,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29593-1843-1/approve",
+        "requests": 9,
+        "average_ms": 204.35,
+        "p50_ms": 204.35,
+        "p95_ms": 204.35,
+        "p99_ms": 204.35,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-30142-1738-1/approve",
+        "requests": 9,
+        "average_ms": 204.26,
+        "p50_ms": 204.26,
+        "p95_ms": 204.26,
+        "p99_ms": 204.26,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-30045-6000/approve",
+        "requests": 10,
+        "average_ms": 201.41,
+        "p50_ms": 201.41,
+        "p95_ms": 201.41,
+        "p99_ms": 201.41,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-OCTANE-30631-3926/approve",
+        "requests": 2,
+        "average_ms": 201.27,
+        "p50_ms": 201.27,
+        "p95_ms": 201.27,
+        "p99_ms": 201.27,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29587-6000/approve",
+        "requests": 6,
+        "average_ms": 201.12,
+        "p50_ms": 201.12,
+        "p95_ms": 201.12,
+        "p99_ms": 201.12,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29388-1636-1/approve",
+        "requests": 8,
+        "average_ms": 200.9,
+        "p50_ms": 200.9,
+        "p95_ms": 200.9,
+        "p99_ms": 200.9,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29605-1204-1/approve",
+        "requests": 6,
+        "average_ms": 197.29,
+        "p50_ms": 197.29,
+        "p95_ms": 197.29,
+        "p99_ms": 197.29,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29427-6000/approve",
+        "requests": 10,
+        "average_ms": 197.29,
+        "p50_ms": 197.29,
+        "p95_ms": 197.29,
+        "p99_ms": 197.29,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-30655-6000/approve",
+        "requests": 2,
+        "average_ms": 197.23,
+        "p50_ms": 197.23,
+        "p95_ms": 197.23,
+        "p99_ms": 197.23,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29515-1307-1/approve",
+        "requests": 7,
+        "average_ms": 196.38,
+        "p50_ms": 196.38,
+        "p95_ms": 196.38,
+        "p99_ms": 196.38,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29619-6000/approve",
+        "requests": 9,
+        "average_ms": 196.34,
+        "p50_ms": 196.34,
+        "p95_ms": 196.34,
+        "p99_ms": 196.34,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29951-1449-1/approve",
+        "requests": 8,
+        "average_ms": 196.32,
+        "p50_ms": 196.32,
+        "p95_ms": 196.32,
+        "p99_ms": 196.32,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29445-1243-1/approve",
+        "requests": 6,
+        "average_ms": 194.2,
+        "p50_ms": 194.2,
+        "p95_ms": 194.2,
+        "p99_ms": 194.2,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-karnaphuli-DIESEL-30745-4458/approve",
+        "requests": 1,
+        "average_ms": 193.8,
+        "p50_ms": 193.8,
+        "p95_ms": 193.8,
+        "p99_ms": 193.8,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-karnaphuli-OCTANE-30760-3433/approve",
+        "requests": 1,
+        "average_ms": 193.18,
+        "p50_ms": 193.18,
+        "p95_ms": 193.18,
+        "p99_ms": 193.18,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-30349-6000/approve",
+        "requests": 5,
+        "average_ms": 192.58,
+        "p50_ms": 192.58,
+        "p95_ms": 192.58,
+        "p99_ms": 192.58,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-30010-2209-1/approve",
+        "requests": 9,
+        "average_ms": 188.96,
+        "p50_ms": 188.96,
+        "p95_ms": 188.96,
+        "p99_ms": 188.96,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-karnaphuli-PETROL-30722-4000-1/approve",
+        "requests": 8,
+        "average_ms": 112.47,
+        "p50_ms": 106.83,
+        "p95_ms": 188.91,
+        "p99_ms": 188.91,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-30030-6000/approve",
+        "requests": 9,
+        "average_ms": 187.99,
+        "p50_ms": 187.99,
+        "p95_ms": 187.99,
+        "p99_ms": 187.99,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29420-6000/approve",
+        "requests": 9,
+        "average_ms": 187.02,
+        "p50_ms": 187.02,
+        "p95_ms": 187.02,
+        "p99_ms": 187.02,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-mirpur-OCTANE-30760-5000/approve",
+        "requests": 2,
+        "average_ms": 125.69,
+        "p50_ms": 66.24,
+        "p95_ms": 185.15,
+        "p99_ms": 185.15,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29375-6000/approve",
+        "requests": 7,
+        "average_ms": 181.97,
+        "p50_ms": 181.97,
+        "p95_ms": 181.97,
+        "p99_ms": 181.97,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29580-1976-1/approve",
+        "requests": 9,
+        "average_ms": 181.89,
+        "p50_ms": 181.89,
+        "p95_ms": 181.89,
+        "p99_ms": 181.89,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29465-1811-1/approve",
+        "requests": 9,
+        "average_ms": 176.99,
+        "p50_ms": 176.99,
+        "p95_ms": 176.99,
+        "p99_ms": 176.99,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29515-6000/approve",
+        "requests": 7,
+        "average_ms": 173.6,
+        "p50_ms": 173.6,
+        "p95_ms": 173.6,
+        "p99_ms": 173.6,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-OCTANE-30680-3864/approve",
+        "requests": 2,
+        "average_ms": 168.49,
+        "p50_ms": 168.49,
+        "p95_ms": 168.49,
+        "p99_ms": 168.49,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29976-1171-1/approve",
+        "requests": 13,
+        "average_ms": 167.35,
+        "p50_ms": 167.35,
+        "p95_ms": 167.35,
+        "p99_ms": 167.35,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29556-2401-1/approve",
+        "requests": 11,
+        "average_ms": 165.91,
+        "p50_ms": 165.91,
+        "p95_ms": 165.91,
+        "p99_ms": 165.91,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-mirpur-OCTANE-30639-5000/approve",
+        "requests": 3,
+        "average_ms": 165.4,
+        "p50_ms": 165.4,
+        "p95_ms": 165.4,
+        "p99_ms": 165.4,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-30434-6000/approve",
+        "requests": 1,
+        "average_ms": 165.26,
+        "p50_ms": 165.26,
+        "p95_ms": 165.26,
+        "p99_ms": 165.26,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29773-1913-1/approve",
+        "requests": 7,
+        "average_ms": 164.93,
+        "p50_ms": 164.93,
+        "p95_ms": 164.93,
+        "p99_ms": 164.93,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29369-6000/approve",
+        "requests": 3,
+        "average_ms": 162.25,
+        "p50_ms": 162.25,
+        "p95_ms": 162.25,
+        "p99_ms": 162.25,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-karnaphuli-PETROL-30631-4000-1/approve",
+        "requests": 2,
+        "average_ms": 116.88,
+        "p50_ms": 73.89,
+        "p95_ms": 159.86,
+        "p99_ms": 159.86,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-karnaphuli-DIESEL-30615-3260-1/approve",
+        "requests": 2,
+        "average_ms": 118.03,
+        "p50_ms": 79.78,
+        "p95_ms": 156.29,
+        "p99_ms": 156.29,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29727-1620-1/approve",
+        "requests": 8,
+        "average_ms": 154.82,
+        "p50_ms": 154.82,
+        "p95_ms": 154.82,
+        "p99_ms": 154.82,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29572-1510-1/approve",
+        "requests": 6,
+        "average_ms": 154.52,
+        "p50_ms": 154.52,
+        "p95_ms": 154.52,
+        "p99_ms": 154.52,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-30078-6000/approve",
+        "requests": 9,
+        "average_ms": 151.95,
+        "p50_ms": 151.95,
+        "p95_ms": 151.95,
+        "p99_ms": 151.95,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-mirpur-DIESEL-30639-3070-1/approve",
+        "requests": 2,
+        "average_ms": 119.57,
+        "p50_ms": 87.46,
+        "p95_ms": 151.67,
+        "p99_ms": 151.67,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-PETROL-30760-6000/approve",
+        "requests": 8,
+        "average_ms": 84.3,
+        "p50_ms": 65.05,
+        "p95_ms": 151.04,
+        "p99_ms": 151.04,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-mirpur-OCTANE-30647-164-1/approve",
+        "requests": 1,
+        "average_ms": 149.98,
+        "p50_ms": 149.98,
+        "p95_ms": 149.98,
+        "p99_ms": 149.98,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-karnaphuli-PETROL-30722-7000/approve",
+        "requests": 4,
+        "average_ms": 116.43,
+        "p50_ms": 130.55,
+        "p95_ms": 149.96,
+        "p99_ms": 149.96,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-mirpur-OCTANE-30697-336-1/approve",
+        "requests": 2,
+        "average_ms": 120.94,
+        "p50_ms": 92.29,
+        "p95_ms": 149.59,
+        "p99_ms": 149.59,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-PETROL-30608-2404-1/approve",
+        "requests": 2,
+        "average_ms": 120.92,
+        "p50_ms": 94.23,
+        "p95_ms": 147.61,
+        "p99_ms": 147.61,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-karnaphuli-DIESEL-30680-4000-1/approve",
+        "requests": 2,
+        "average_ms": 105.65,
+        "p50_ms": 63.98,
+        "p95_ms": 147.32,
+        "p99_ms": 147.32,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-mirpur-OCTANE-30663-5000/approve",
+        "requests": 2,
+        "average_ms": 147.21,
+        "p50_ms": 147.21,
+        "p95_ms": 147.21,
+        "p99_ms": 147.21,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-30663-1860-1/approve",
+        "requests": 2,
+        "average_ms": 118.74,
+        "p50_ms": 90.41,
+        "p95_ms": 147.06,
+        "p99_ms": 147.06,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-PETROL-30689-2218-1/approve",
+        "requests": 1,
+        "average_ms": 146.34,
+        "p50_ms": 146.34,
+        "p95_ms": 146.34,
+        "p99_ms": 146.34,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-30603-1531-1/approve",
+        "requests": 2,
+        "average_ms": 111.64,
+        "p50_ms": 77.59,
+        "p95_ms": 145.68,
+        "p99_ms": 145.68,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29681-1977-1/approve",
+        "requests": 9,
+        "average_ms": 142.36,
+        "p50_ms": 142.36,
+        "p95_ms": 142.36,
+        "p99_ms": 142.36,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-karnaphuli-OCTANE-30776-893/approve",
+        "requests": 5,
+        "average_ms": 124.73,
+        "p50_ms": 110.32,
+        "p95_ms": 139.14,
+        "p99_ms": 139.14,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-30263-6000/approve",
+        "requests": 3,
+        "average_ms": 138.62,
+        "p50_ms": 138.62,
+        "p95_ms": 138.62,
+        "p99_ms": 138.62,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-30073-1619-1/approve",
+        "requests": 8,
+        "average_ms": 136.89,
+        "p50_ms": 136.89,
+        "p95_ms": 136.89,
+        "p99_ms": 136.89,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-30349-1275-1/approve",
+        "requests": 4,
+        "average_ms": 130.71,
+        "p50_ms": 130.71,
+        "p95_ms": 130.71,
+        "p99_ms": 130.71,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-OCTANE-30639-4087/approve",
+        "requests": 3,
+        "average_ms": 130.69,
+        "p50_ms": 130.69,
+        "p95_ms": 130.69,
+        "p99_ms": 130.69,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-mirpur-OCTANE-30760-664-1/approve",
+        "requests": 7,
+        "average_ms": 109.28,
+        "p50_ms": 129.5,
+        "p95_ms": 129.73,
+        "p99_ms": 129.73,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-30214-6000/approve",
+        "requests": 4,
+        "average_ms": 128.78,
+        "p50_ms": 128.78,
+        "p95_ms": 128.78,
+        "p99_ms": 128.78,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-mirpur-DIESEL-30639-5000/approve",
+        "requests": 2,
+        "average_ms": 126.91,
+        "p50_ms": 126.91,
+        "p95_ms": 126.91,
+        "p99_ms": 126.91,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-karnaphuli-DIESEL-30615-7000/approve",
+        "requests": 1,
+        "average_ms": 121.3,
+        "p50_ms": 121.3,
+        "p95_ms": 121.3,
+        "p99_ms": 121.3,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-mirpur-OCTANE-30672-5000/approve",
+        "requests": 2,
+        "average_ms": 119.05,
+        "p50_ms": 119.05,
+        "p95_ms": 119.05,
+        "p99_ms": 119.05,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-OCTANE-30745-3773/approve",
+        "requests": 4,
+        "average_ms": 114.65,
+        "p50_ms": 114.65,
+        "p95_ms": 114.65,
+        "p99_ms": 114.65,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-mirpur-DIESEL-30631-5000/approve",
+        "requests": 3,
+        "average_ms": 109.53,
+        "p50_ms": 109.53,
+        "p95_ms": 109.53,
+        "p99_ms": 109.53,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-OCTANE-30647-3989/approve",
+        "requests": 2,
+        "average_ms": 104.3,
+        "p50_ms": 104.3,
+        "p95_ms": 104.3,
+        "p99_ms": 104.3,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-mirpur-PETROL-30655-259-2/approve",
+        "requests": 2,
+        "average_ms": 87.58,
+        "p50_ms": 74.74,
+        "p95_ms": 100.42,
+        "p99_ms": 100.42,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-30388-6000/approve",
+        "requests": 3,
+        "average_ms": 89.73,
+        "p50_ms": 89.73,
+        "p95_ms": 89.73,
+        "p99_ms": 89.73,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29524-1225-1/approve",
+        "requests": 9,
+        "average_ms": 88.08,
+        "p50_ms": 88.08,
+        "p95_ms": 88.08,
+        "p99_ms": 88.08,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-OCTANE-30615-4080/approve",
+        "requests": 4,
+        "average_ms": 87.24,
+        "p50_ms": 87.24,
+        "p95_ms": 87.24,
+        "p99_ms": 87.24,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-29369-2034-1/approve",
+        "requests": 8,
+        "average_ms": 81.54,
+        "p50_ms": 81.54,
+        "p95_ms": 81.54,
+        "p99_ms": 81.54,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-OCTANE-30689-3864/approve",
+        "requests": 2,
+        "average_ms": 81.51,
+        "p50_ms": 81.51,
+        "p95_ms": 81.51,
+        "p99_ms": 81.51,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-OCTANE-30672-3712/approve",
+        "requests": 2,
+        "average_ms": 80.22,
+        "p50_ms": 80.22,
+        "p95_ms": 80.22,
+        "p99_ms": 80.22,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-PETROL-30689-6000/approve",
+        "requests": 1,
+        "average_ms": 78.75,
+        "p50_ms": 78.75,
+        "p95_ms": 78.75,
+        "p99_ms": 78.75,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-OCTANE-30639-3926/approve",
+        "requests": 4,
+        "average_ms": 78.25,
+        "p50_ms": 78.25,
+        "p95_ms": 78.25,
+        "p99_ms": 78.25,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-OCTANE-30631-3591/approve",
+        "requests": 2,
+        "average_ms": 75.3,
+        "p50_ms": 75.3,
+        "p95_ms": 75.3,
+        "p99_ms": 75.3,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-PETROL-30603-6000/approve",
+        "requests": 3,
+        "average_ms": 72.34,
+        "p50_ms": 72.34,
+        "p95_ms": 72.34,
+        "p99_ms": 72.34,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-mirpur-OCTANE-30689-5000/approve",
+        "requests": 3,
+        "average_ms": 72.33,
+        "p50_ms": 72.33,
+        "p95_ms": 72.33,
+        "p99_ms": 72.33,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-mirpur-OCTANE-30647-5000/approve",
+        "requests": 2,
+        "average_ms": 69.26,
+        "p50_ms": 69.26,
+        "p95_ms": 69.26,
+        "p99_ms": 69.26,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-OCTANE-30623-4098/approve",
+        "requests": 2,
+        "average_ms": 69.17,
+        "p50_ms": 69.17,
+        "p95_ms": 69.17,
+        "p99_ms": 69.17,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-OCTANE-30603-3804/approve",
+        "requests": 2,
+        "average_ms": 69.1,
+        "p50_ms": 69.1,
+        "p95_ms": 69.1,
+        "p99_ms": 69.1,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-OCTANE-30663-3929/approve",
+        "requests": 1,
+        "average_ms": 67.88,
+        "p50_ms": 67.88,
+        "p95_ms": 67.88,
+        "p99_ms": 67.88,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-mirpur-PETROL-30655-5000/approve",
+        "requests": 1,
+        "average_ms": 67.38,
+        "p50_ms": 67.38,
+        "p95_ms": 67.38,
+        "p99_ms": 67.38,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-karnaphuli-PETROL-30631-7000/approve",
+        "requests": 4,
+        "average_ms": 67.13,
+        "p50_ms": 67.13,
+        "p95_ms": 67.13,
+        "p99_ms": 67.13,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-OCTANE-30655-3989/approve",
+        "requests": 2,
+        "average_ms": 65.27,
+        "p50_ms": 65.27,
+        "p95_ms": 65.27,
+        "p99_ms": 65.27,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-OCTANE-30680-3712/approve",
+        "requests": 1,
+        "average_ms": 64.21,
+        "p50_ms": 64.21,
+        "p95_ms": 64.21,
+        "p99_ms": 64.21,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-karnaphuli-DIESEL-30680-7000/approve",
+        "requests": 1,
+        "average_ms": 63.47,
+        "p50_ms": 63.47,
+        "p95_ms": 63.47,
+        "p99_ms": 63.47,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-karnaphuli-PETROL-30697-4000-1/approve",
+        "requests": 3,
+        "average_ms": 63.39,
+        "p50_ms": 63.39,
+        "p95_ms": 63.39,
+        "p99_ms": 63.39,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-mirpur-OCTANE-30697-5000/approve",
+        "requests": 2,
+        "average_ms": 62.71,
+        "p50_ms": 62.71,
+        "p95_ms": 62.71,
+        "p99_ms": 62.71,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-OCTANE-30623-3591/approve",
+        "requests": 2,
+        "average_ms": 62.37,
+        "p50_ms": 62.37,
+        "p95_ms": 62.37,
+        "p99_ms": 62.37,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-OCTANE-30722-1877/approve",
+        "requests": 2,
+        "average_ms": 62.34,
+        "p50_ms": 62.34,
+        "p95_ms": 62.34,
+        "p99_ms": 62.34,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-OCTANE-30608-3804/approve",
+        "requests": 2,
+        "average_ms": 61.0,
+        "p50_ms": 61.0,
+        "p95_ms": 61.0,
+        "p99_ms": 61.0,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-30214-1485-1/approve",
+        "requests": 2,
+        "average_ms": 60.38,
+        "p50_ms": 60.38,
+        "p95_ms": 60.38,
+        "p99_ms": 60.38,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-OCTANE-30615-4098/approve",
+        "requests": 3,
+        "average_ms": 58.53,
+        "p50_ms": 58.53,
+        "p95_ms": 58.53,
+        "p99_ms": 58.53,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-30222-6000/approve",
+        "requests": 3,
+        "average_ms": 56.54,
+        "p50_ms": 56.54,
+        "p95_ms": 56.54,
+        "p99_ms": 56.54,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-karnaphuli-OCTANE-30680-2167/approve",
+        "requests": 1,
+        "average_ms": 56.34,
+        "p50_ms": 56.34,
+        "p95_ms": 56.34,
+        "p99_ms": 56.34,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-30222-1388-1/approve",
+        "requests": 3,
+        "average_ms": 56.19,
+        "p50_ms": 56.19,
+        "p95_ms": 56.19,
+        "p99_ms": 56.19,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-karnaphuli-DIESEL-30608-7000/approve",
+        "requests": 3,
+        "average_ms": 55.13,
+        "p50_ms": 55.13,
+        "p95_ms": 55.13,
+        "p99_ms": 55.13,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-OCTANE-30608-4080/approve",
+        "requests": 2,
+        "average_ms": 53.79,
+        "p50_ms": 53.79,
+        "p95_ms": 53.79,
+        "p99_ms": 53.79,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-30722-4122/approve",
+        "requests": 1,
+        "average_ms": 52.72,
+        "p50_ms": 52.72,
+        "p95_ms": 52.72,
+        "p99_ms": 52.72,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-30663-6000/approve",
+        "requests": 1,
+        "average_ms": 52.63,
+        "p50_ms": 52.63,
+        "p95_ms": 52.63,
+        "p99_ms": 52.63,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-30263-1308-1/approve",
+        "requests": 3,
+        "average_ms": 51.27,
+        "p50_ms": 51.27,
+        "p95_ms": 51.27,
+        "p99_ms": 51.27,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-karnaphuli-PETROL-30623-7000/approve",
+        "requests": 3,
+        "average_ms": 47.13,
+        "p50_ms": 47.13,
+        "p95_ms": 47.13,
+        "p99_ms": 47.13,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-karnaphuli-PETROL-30697-7000/approve",
+        "requests": 2,
+        "average_ms": 46.88,
+        "p50_ms": 46.88,
+        "p95_ms": 46.88,
+        "p99_ms": 46.88,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-30203-1388-1/approve",
+        "requests": 2,
+        "average_ms": 46.1,
+        "p50_ms": 46.1,
+        "p95_ms": 46.1,
+        "p99_ms": 46.1,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-OCTANE-30689-4053/approve",
+        "requests": 2,
+        "average_ms": 44.99,
+        "p50_ms": 44.99,
+        "p95_ms": 44.99,
+        "p99_ms": 44.99,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-mirpur-PETROL-30655-5000-1/approve",
+        "requests": 2,
+        "average_ms": 43.04,
+        "p50_ms": 43.04,
+        "p95_ms": 43.04,
+        "p99_ms": 43.04,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-OCTANE-30697-3740/approve",
+        "requests": 2,
+        "average_ms": 41.5,
+        "p50_ms": 41.5,
+        "p95_ms": 41.5,
+        "p99_ms": 41.5,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-PETROL-30603-2404-1/approve",
+        "requests": 7,
+        "average_ms": 21.31,
+        "p50_ms": 17.75,
+        "p95_ms": 39.26,
+        "p99_ms": 39.26,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-PETROL-30608-6000/approve",
+        "requests": 3,
+        "average_ms": 36.87,
+        "p50_ms": 36.87,
+        "p95_ms": 36.87,
+        "p99_ms": 36.87,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-30598-1531-1/approve",
+        "requests": 8,
+        "average_ms": 20.79,
+        "p50_ms": 22.45,
+        "p95_ms": 33.8,
+        "p99_ms": 33.8,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-OCTANE-30697-4053/approve",
+        "requests": 3,
+        "average_ms": 32.88,
+        "p50_ms": 32.88,
+        "p95_ms": 32.88,
+        "p99_ms": 32.88,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-mirpur-PETROL-30647-5000-1/approve",
+        "requests": 1,
+        "average_ms": 30.38,
+        "p50_ms": 30.38,
+        "p95_ms": 30.38,
+        "p99_ms": 30.38,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-30603-6000/approve",
+        "requests": 3,
+        "average_ms": 30.19,
+        "p50_ms": 30.19,
+        "p95_ms": 30.19,
+        "p99_ms": 30.19,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-karnaphuli-OCTANE-30623-2153/approve",
+        "requests": 3,
+        "average_ms": 28.16,
+        "p50_ms": 28.16,
+        "p95_ms": 28.16,
+        "p99_ms": 28.16,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-OCTANE-30672-3929/approve",
+        "requests": 3,
+        "average_ms": 25.74,
+        "p50_ms": 25.74,
+        "p95_ms": 25.74,
+        "p99_ms": 25.74,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-coxsbazar-DIESEL-30388-1905-1/approve",
+        "requests": 5,
+        "average_ms": 20.02,
+        "p50_ms": 20.02,
+        "p95_ms": 20.02,
+        "p99_ms": 20.02,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations/rec-station-mirpur-PETROL-30647-5000/approve",
+        "requests": 1,
+        "average_ms": 19.88,
+        "p50_ms": 19.88,
+        "p95_ms": 19.88,
+        "p99_ms": 19.88,
+        "error_rate": 0.0
+      }
+    ],
+    "container_cpu_cores": [
+      0.05145,
+      0.044333333333333336,
+      0.05574166666666667,
+      0.053391666666666664
+    ],
+    "container_memory_bytes": [
+      101544099.84,
+      106115891.2,
+      112617062.4,
+      202584883.2
+    ],
+    "host_load_average": [
+      3.87841796875,
+      4.5107421875,
+      4.52783203125,
+      4.39892578125
+    ]
+  }
+]

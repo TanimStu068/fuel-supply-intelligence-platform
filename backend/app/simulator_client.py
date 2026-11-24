@@ -30,11 +30,15 @@ from typing import Any, TypeVar
 import httpx
 from pydantic import BaseModel, TypeAdapter, ValidationError
 
+from .circuit_breaker import CircuitBreaker
 from .config import Settings, get_settings
 from .metrics import (
+    CIRCUIT_CALLS_ALLOWED,
+    CIRCUIT_CALLS_REFUSED,
     SIMULATOR_REQUEST_DURATION,
     SIMULATOR_REQUESTS,
     SIMULATOR_STALE_RESPONSES,
+    SIMULATOR_VALIDATION_REJECTIONS,
 )
 from .simulator_errors import (
     ALLOCATION_NOT_FOUND,
@@ -111,6 +115,14 @@ class SimulatorClient:
             ),
             headers={"Accept": "application/json"},
         )
+        #: The breaker that protects the simulator from a retry storm.
+        #: A retrying client against a pooled dependency is how the
+        #: simulator's connection pool got exhausted in the first place.
+        self._breaker = CircuitBreaker(
+            name="simulator",
+            failure_threshold=self._settings.circuit_breaker_failures,
+            recovery_timeout=self._settings.circuit_breaker_recovery_seconds,
+        )
         #: True when the simulator has served stale data since the last
         #: :meth:`reset_stale` call. Sticky on purpose: a snapshot built from
         #: several concurrent requests must report stale if *any* of its
@@ -120,6 +132,11 @@ class SimulatorClient:
         self.last_stale = False
         #: Endpoint path of the most recent request, for error messages.
         self._last_path: str | None = None
+
+    @property
+    def breaker(self) -> CircuitBreaker:
+        """The circuit breaker guarding the simulator."""
+        return self._breaker
 
     @property
     def stale(self) -> bool:
@@ -219,6 +236,21 @@ class SimulatorClient:
         for attempt in range(attempts_allowed + 1):
             self._last_path = path
             started = time.perf_counter()
+
+            # The breaker is checked *before* the request, not after the
+            # failure. A retrying client against a dependency with a small
+            # connection pool is how that pool gets exhausted: every retry
+            # takes a fresh connection while the previous one is still
+            # waiting. Refusing the call outright gives the dependency room
+            # to recover.
+            if not self._breaker.allows():
+                self._breaker.refuse()
+                CIRCUIT_CALLS_REFUSED.labels(circuit="simulator").inc()
+                raise SimulatorConnectionError(
+                    f"the circuit breaker for the simulator is open; not calling {path}"
+                )
+            CIRCUIT_CALLS_ALLOWED.labels(circuit="simulator").inc()
+
             try:
                 response = await self._client.request(
                     method,
@@ -226,15 +258,20 @@ class SimulatorClient:
                     json=payload,
                     params=params,
                     headers=self._build_headers(headers),
+                    timeout=self._timeout_for(path),
                 )
             except httpx.TimeoutException as exc:
                 last_error = SimulatorTimeoutError(f"timeout calling {path}: {exc}")
+                self._breaker.record_failure()
+                SIMULATOR_REQUESTS.labels(outcome="timeout").inc()
                 logger.warning(
                     "simulator timeout",
                     extra={"path": path, "attempt": attempt + 1, "error": str(exc)},
                 )
             except httpx.HTTPError as exc:
                 last_error = SimulatorConnectionError(f"cannot reach simulator: {exc}")
+                self._breaker.record_failure()
+                SIMULATOR_REQUESTS.labels(outcome="unreachable").inc()
                 logger.warning(
                     "simulator transport error",
                     extra={"path": path, "attempt": attempt + 1, "error": str(exc)},
@@ -255,7 +292,9 @@ class SimulatorClient:
                 ok_codes = success_codes or frozenset({200})
                 if response.status_code in ok_codes:
                     SIMULATOR_REQUESTS.labels(outcome="success").inc()
-                    return self._decode(response, model, path)
+                    decoded_value = self._decode(response, model, path)
+                    self._breaker.record_success()
+                    return decoded_value
 
                 decoded: Any = None
                 try:
@@ -268,6 +307,9 @@ class SimulatorClient:
                 except FaultInjectedError as exc:
                     last_error = exc
                     SIMULATOR_REQUESTS.labels(outcome="fault_injected").inc()
+                    # An injected fault is the simulator deliberately
+                    # misbehaving, not the dependency being broken, so it
+                    # does not trip the breaker.
                     logger.warning(
                         "simulator fault injected",
                         extra={
@@ -277,8 +319,17 @@ class SimulatorClient:
                             "stale": self.last_stale,
                         },
                     )
+                except ConflictError:
+                    # A 409 is a *domain* answer: the simulator is healthy
+                    # and the request conflicts with the current state. It
+                    # must not trip the breaker, or a run of legitimate
+                    # conflicts would make the platform think the
+                    # simulator itself is broken.
+                    SIMULATOR_REQUESTS.labels(outcome="conflict").inc()
+                    raise
                 except SimulatorAPIError:
                     SIMULATOR_REQUESTS.labels(outcome="error").inc()
+                    self._breaker.record_failure()
                     raise
                 else:  # pragma: no cover - _raise_for_error always raises
                     raise SimulatorAPIError(
@@ -290,6 +341,20 @@ class SimulatorClient:
 
         assert last_error is not None
         raise last_error
+
+    def _timeout_for(self, path: str) -> httpx.Timeout:
+        """The timeout for one call to ``path``.
+
+        The health probe gets a short one: it is on the container
+        healthcheck's critical path, and a probe that waits out the full
+        request timeout makes an unhealthy dependency look like a slow one.
+        Every other call gets the configured request timeout.
+        """
+        if path.endswith("/health"):
+            timeout = self._settings.simulator_health_timeout
+        else:
+            timeout = self._settings.simulator_request_timeout
+        return httpx.Timeout(timeout, connect=self._settings.simulator_connect_timeout)
 
     def _decode(self, response: httpx.Response, model: type[ModelT] | None, path: str) -> Any:
         """Decode and (optionally) validate a successful response body."""
@@ -307,6 +372,7 @@ class SimulatorClient:
             # TypeAdapter handles both uniformly.
             return TypeAdapter(model).validate_python(data)
         except ValidationError as exc:
+            SIMULATOR_VALIDATION_REJECTIONS.labels(endpoint=path).inc()
             logger.error(
                 "rejecting malformed simulator payload",
                 extra={"path": path, "error": str(exc), "payload": data},

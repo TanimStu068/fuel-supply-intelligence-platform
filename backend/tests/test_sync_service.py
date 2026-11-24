@@ -19,7 +19,11 @@ from typing import Any
 import pytest
 
 from app.config import Settings
-from app.simulator_errors import SimulatorAPIError, SimulatorConnectionError
+from app.simulator_errors import (
+    FaultInjectedError,
+    SimulatorAPIError,
+    SimulatorConnectionError,
+)
 from app.state_cache import StateCache
 from app.sync_service import SyncService
 
@@ -88,6 +92,9 @@ class _FakeClient:
         #: the real client does when the server sends it.
         self.force_stale = False
         self.unreachable = False
+        #: When set, every read raises the 503 the simulator returns when a
+        #: fault has been injected into it.
+        self.faulted = False
         self.instance_calls = 0
         self.allocation_calls = 0
         self.depot_calls = 0
@@ -104,6 +111,8 @@ class _FakeClient:
     def _guard(self) -> None:
         if self.unreachable:
             raise SimulatorConnectionError("connection refused")
+        if self.faulted:
+            raise FaultInjectedError(503, "FAULT_INJECTED", "a fault is injected")
         if self.force_stale:
             self.stale = True
             self.last_stale = True
@@ -394,6 +403,43 @@ async def test_recovery_clears_the_degraded_flag(service, client, cache) -> None
     assert cache.degraded_reason is None
 
 
+async def test_an_injected_fault_degrades_the_cache(service, client, cache) -> None:
+    """A faulted simulator must not leave stale data looking fresh.
+
+    An injected fault is not the dependency being broken — it does not
+    trip the circuit breaker — but the sync cycle still did not reach the
+    world. Serving the cached copy as if it were current would be a lie,
+    so the cache goes degraded and carries its age, exactly as it does
+    when the simulator vanishes.
+    """
+    assert await service.run_sync_cycle() is True
+    assert cache.degraded is False
+
+    client.faulted = True
+
+    assert await service.run_sync_cycle() is False
+    assert cache.degraded is True
+    assert cache.degraded_reason is not None
+    # The last-known state is still served, flagged and aged.
+    assert cache.has_state is True
+    assert cache.metadata()["degraded"] is True
+    assert cache.metadata()["age_seconds"] is not None
+
+
+async def test_recovery_from_an_injected_fault_clears_the_degraded_flag(
+    service, client, cache
+) -> None:
+    await service.run_sync_cycle()
+    client.faulted = True
+    await service.run_sync_cycle()
+    assert cache.degraded is True
+
+    client.faulted = False
+
+    assert await service.run_sync_cycle() is True
+    assert cache.degraded is False
+
+
 # -- stale handling --------------------------------------------------------
 
 
@@ -592,3 +638,94 @@ async def test_an_empty_store_keeps_the_stored_history(service, client, stored_h
     await service.ingest_demand_history()
 
     assert stored_history["truncated"] is False
+
+
+# -- sync coalescing --------------------------------------------------------
+
+
+async def test_a_burst_of_sync_requests_runs_one_cycle(service, client) -> None:
+    """Several requests arriving together must not each run a cycle.
+
+    The simulator publishes a tick event several times a second, and one
+    full cycle reads nine endpoints. Without coalescing that is roughly
+    seventy requests a second against a simulator whose database pool holds
+    fifteen connections — which is how the platform used to take the
+    simulator down.
+    """
+    import asyncio
+
+    cycles = 0
+    original = service.run_sync_cycle
+
+    async def _counting_cycle() -> bool:
+        nonlocal cycles
+        cycles += 1
+        return await original()
+
+    service.run_sync_cycle = _counting_cycle
+
+    await asyncio.gather(*(service._request_sync() for _ in range(10)))
+
+    # Ten separate cycles would have read the world ten times. The
+    # coalescing turns them into one.
+    assert cycles == 1
+
+
+async def test_a_request_arriving_during_a_cycle_runs_one_more(service, client) -> None:
+    """A request that lands while a cycle is running is not lost.
+
+    It collapses into a single follow-up cycle rather than being dropped or
+    queued one-for-one.
+    """
+    import asyncio
+
+    cycles = 0
+    original = service.run_sync_cycle
+
+    async def _slow_cycle() -> bool:
+        nonlocal cycles
+        cycles += 1
+        await asyncio.sleep(0.05)
+        return await original()
+
+    service.run_sync_cycle = _slow_cycle
+
+    first = asyncio.create_task(service._request_sync())
+    await asyncio.sleep(0.01)
+    # These arrive while the first cycle is still running.
+    await asyncio.gather(*(service._request_sync() for _ in range(5)))
+    await first
+
+    # The first cycle plus exactly one follow-up: the five requests that
+    # arrived mid-cycle collapse into a single extra cycle.
+    assert cycles == 2
+
+
+async def test_the_sync_lock_serialises_cycles(service, client) -> None:
+    """Two cycles must never overlap.
+
+    An overlapping cycle reads the same world the other one is reading, and
+    doubles the load on the simulator for no benefit.
+    """
+    import asyncio
+
+    concurrent = 0
+    peak = 0
+
+    original = service._fetch_world
+
+    async def _tracking_fetch():
+        nonlocal concurrent, peak
+        concurrent += 1
+        peak = max(peak, concurrent)
+        try:
+            await asyncio.sleep(0.02)
+            return await original()
+        finally:
+            concurrent -= 1
+
+    service._fetch_world = _tracking_fetch
+
+    await asyncio.gather(*(service._request_sync() for _ in range(6)))
+
+    assert peak == 1
