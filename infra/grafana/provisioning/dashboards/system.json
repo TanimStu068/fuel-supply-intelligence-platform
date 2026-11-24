@@ -12,154 +12,216 @@
     {
       "id": 1,
       "type": "stat",
-      "title": "Backend CPU",
-      "description": "The backend container's CPU use, in cores.",
-      "gridPos": {"h": 5, "w": 6, "x": 0, "y": 0},
+      "title": "Host CPU",
+      "description": "The host's CPU use across every core, as a percentage. This is the machine the platform shares with other projects' stacks.",
+      "gridPos": {"h": 5, "w": 5, "x": 0, "y": 0},
       "targets": [
         {
-          "expr": "sum(rate(container_cpu_usage_seconds_total{name=\"fuel-backend\"}[5m]))",
+          "expr": "100 - (avg(rate(node_cpu_seconds_total{mode=\"idle\"}[5m])) * 100)",
           "refId": "A"
         }
       ],
-      "fieldConfig": {"defaults": {"unit": "cores", "decimals": 3}}
+      "fieldConfig": {"defaults": {"unit": "percent", "decimals": 1, "min": 0, "max": 100}}
     },
     {
       "id": 2,
       "type": "stat",
-      "title": "Backend memory",
-      "description": "The backend container's working set, against its limit.",
-      "gridPos": {"h": 5, "w": 6, "x": 6, "y": 0},
+      "title": "Host memory",
+      "description": "The host's memory in use, against what it has.",
+      "gridPos": {"h": 5, "w": 5, "x": 5, "y": 0},
       "targets": [
         {
-          "expr": "sum(container_memory_working_set_bytes{name=\"fuel-backend\"})",
-          "legendFormat": "used",
+          "expr": "100 * (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes))",
           "refId": "A"
-        },
-        {
-          "expr": "sum(container_spec_memory_limit_bytes{name=\"fuel-backend\"})",
-          "legendFormat": "limit",
-          "refId": "B"
         }
       ],
-      "fieldConfig": {"defaults": {"unit": "bytes"}}
+      "fieldConfig": {"defaults": {"unit": "percent", "decimals": 1, "min": 0, "max": 100}}
     },
     {
       "id": 3,
       "type": "stat",
-      "title": "Simulator CPU",
-      "description": "The simulator container's CPU use, in cores.",
-      "gridPos": {"h": 5, "w": 6, "x": 12, "y": 0},
-      "targets": [
-        {
-          "expr": "sum(rate(container_cpu_usage_seconds_total{name=\"fuel-simulator\"}[5m]))",
-          "refId": "A"
-        }
-      ],
-      "fieldConfig": {"defaults": {"unit": "cores", "decimals": 3}}
+      "title": "Host load (1m)",
+      "description": "The host's one-minute load average. The load test's numbers are only comparable when this is low.",
+      "gridPos": {"h": 5, "w": 5, "x": 10, "y": 0},
+      "targets": [{"expr": "node_load1", "refId": "A"}],
+      "fieldConfig": {"defaults": {"decimals": 2}}
     },
     {
       "id": 4,
       "type": "stat",
-      "title": "Simulator memory",
-      "description": "The simulator container's working set.",
-      "gridPos": {"h": 5, "w": 6, "x": 18, "y": 0},
+      "title": "Backend memory",
+      "description": "The backend container's working set against the limit Docker enforces on it — read from its own cgroup, which is the number that would actually kill it.",
+      "gridPos": {"h": 5, "w": 5, "x": 15, "y": 0},
       "targets": [
-        {
-          "expr": "sum(container_memory_working_set_bytes{name=\"fuel-simulator\"})",
-          "refId": "A"
-        }
+        {"expr": "container_memory_usage_bytes", "legendFormat": "used", "refId": "A"},
+        {"expr": "container_memory_limit_bytes", "legendFormat": "limit", "refId": "B"}
       ],
       "fieldConfig": {"defaults": {"unit": "bytes"}}
     },
     {
       "id": 5,
-      "type": "timeseries",
-      "title": "CPU by container",
-      "description": "Every container's CPU use. A spike here with the simulator flat usually means the platform is retrying.",
-      "gridPos": {"h": 9, "w": 12, "x": 0, "y": 5},
-      "targets": [
-        {
-          "expr": "sum by (name) (rate(container_cpu_usage_seconds_total{name!=\"\"}[5m]))",
-          "legendFormat": "{{name}}",
-          "refId": "A"
+      "type": "stat",
+      "title": "Backend memory used",
+      "description": "How much of the backend's memory budget is in use. Above 85% the container is a candidate for being killed.",
+      "gridPos": {"h": 5, "w": 4, "x": 20, "y": 0},
+      "targets": [{"expr": "container_memory_fraction", "refId": "A"}],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "decimals": 3,
+          "mappings": [
+            {"type": "value", "options": {"0.85": {"text": ">85%", "color": "red"}}}
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "orange", "value": 0.7},
+              {"color": "red", "value": 0.85}
+            ]
+          }
         }
-      ],
-      "fieldConfig": {"defaults": {"unit": "cores"}}
+      }
     },
     {
       "id": 6,
       "type": "timeseries",
-      "title": "Memory by container",
-      "description": "Working set per container.",
-      "gridPos": {"h": 9, "w": 12, "x": 12, "y": 5},
+      "title": "Host CPU by core",
+      "description": "Every core's use. A machine with all of them busy is a machine the platform is fighting for.",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 5},
       "targets": [
         {
-          "expr": "sum by (name) (container_memory_working_set_bytes{name!=\"\"})",
-          "legendFormat": "{{name}}",
+          "expr": "100 - (rate(node_cpu_seconds_total{mode=\"idle\"}[5m]) * 100)",
+          "legendFormat": "cpu{{cpu}}",
           "refId": "A"
         }
       ],
-      "fieldConfig": {"defaults": {"unit": "bytes"}}
+      "fieldConfig": {"defaults": {"unit": "percent", "min": 0, "max": 100}}
     },
     {
       "id": 7,
       "type": "timeseries",
-      "title": "Memory against the limit",
-      "description": "How close each container is to being killed for using too much memory.",
-      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 14},
+      "title": "Host memory",
+      "description": "The host's total, available and used memory over time. The gap between 'used' and 'available' is what the page cache is holding.",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 5},
       "targets": [
-        {
-          "expr": "sum by (name) (container_memory_working_set_bytes{name!=\"\"}) / sum by (name) (container_spec_memory_limit_bytes{name!=\"\"})",
-          "legendFormat": "{{name}}",
-          "refId": "A"
-        }
+        {"expr": "node_memory_MemTotal_bytes", "legendFormat": "total", "refId": "A"},
+        {"expr": "node_memory_MemAvailable_bytes", "legendFormat": "available", "refId": "B"},
+        {"expr": "node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes", "legendFormat": "used", "refId": "C"}
       ],
-      "fieldConfig": {"defaults": {"unit": "percentunit", "min": 0, "max": 1}}
+      "fieldConfig": {"defaults": {"unit": "bytes"}}
     },
     {
       "id": 8,
       "type": "timeseries",
-      "title": "Network received",
-      "description": "Bytes received per container per second.",
-      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 14},
+      "title": "Host memory in use",
+      "description": "The share of the host's memory that is in use. This is the number that decides whether the platform can run alongside the other stacks.",
+      "gridPos": {"h": 7, "w": 12, "x": 0, "y": 13},
       "targets": [
         {
-          "expr": "sum by (name) (rate(container_network_receive_bytes_total{name!=\"\"}[5m]))",
-          "legendFormat": "{{name}}",
+          "expr": "100 * (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes))",
+          "legendFormat": "in use",
           "refId": "A"
         }
       ],
-      "fieldConfig": {"defaults": {"unit": "Bps"}}
+      "fieldConfig": {"defaults": {"unit": "percent", "min": 0, "max": 100}}
     },
     {
       "id": 9,
       "type": "timeseries",
-      "title": "Filesystem usage",
-      "description": "How much of each container's writable layer is in use.",
-      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 22},
+      "title": "Backend memory against its limit",
+      "description": "The backend's working set and the ceiling Docker enforces on it. The two lines meeting is the backend about to be killed.",
+      "gridPos": {"h": 7, "w": 12, "x": 12, "y": 13},
       "targets": [
-        {
-          "expr": "sum by (name) (container_fs_usage_bytes{name!=\"\"})",
-          "legendFormat": "{{name}}",
-          "refId": "A"
-        }
+        {"expr": "container_memory_usage_bytes", "legendFormat": "used", "refId": "A"},
+        {"expr": "container_memory_limit_bytes", "legendFormat": "limit", "refId": "B"}
       ],
       "fieldConfig": {"defaults": {"unit": "bytes"}}
     },
     {
       "id": 10,
       "type": "timeseries",
-      "title": "Container restarts",
-      "description": "A rising counter here means the orchestrator is killing a container.",
-      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 22},
+      "title": "Host disk usage",
+      "description": "How much of each filesystem is in use. An unbounded log fills the disk, and a full disk stalls the Docker daemon itself.",
+      "gridPos": {"h": 7, "w": 12, "x": 0, "y": 20},
       "targets": [
         {
-          "expr": "sum by (name) (increase(container_restarts_total{name!=\"\"}[15m]))",
-          "legendFormat": "{{name}}",
+          "expr": "100 * (1 - (node_filesystem_avail_bytes{fstype!=\"tmpfs\"} / node_filesystem_size_bytes{fstype!=\"tmpfs\"}))",
+          "legendFormat": "{{mountpoint}}",
           "refId": "A"
         }
       ],
-      "fieldConfig": {"defaults": {"unit": "short"}}
+      "fieldConfig": {"defaults": {"unit": "percent", "min": 0, "max": 100}}
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "Host network",
+      "description": "Bytes received and transmitted per second across the host's interfaces.",
+      "gridPos": {"h": 7, "w": 12, "x": 12, "y": 20},
+      "targets": [
+        {
+          "expr": "sum by (device) (rate(node_network_receive_bytes_total{device!~\"lo|veth.*|docker.*|br-.*\"}[5m]))",
+          "legendFormat": "received · {{device}}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum by (device) (rate(node_network_transmit_bytes_total{device!~\"lo|veth.*|docker.*|br-.*\"}[5m]))",
+          "legendFormat": "transmitted · {{device}}",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {"defaults": {"unit": "Bps"}}
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "Host uptime and load",
+      "description": "How long the machine has been up, and what it is carrying. A load average above the core count means the scheduler is the bottleneck, not any one service.",
+      "gridPos": {"h": 7, "w": 12, "x": 0, "y": 27},
+      "targets": [
+        {"expr": "node_load1", "legendFormat": "load 1m", "refId": "A"},
+        {"expr": "node_load5", "legendFormat": "load 5m", "refId": "B"},
+        {"expr": "node_load15", "legendFormat": "load 15m", "refId": "C"}
+      ],
+      "fieldConfig": {"defaults": {"decimals": 2}}
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "Backend process memory",
+      "description": "The Python process's own resident memory, next to the container's working set. The difference is everything the runtime holds outside the heap.",
+      "gridPos": {"h": 7, "w": 12, "x": 12, "y": 27},
+      "targets": [
+        {"expr": "process_resident_memory_bytes", "legendFormat": "resident", "refId": "A"},
+        {"expr": "process_virtual_memory_bytes", "legendFormat": "virtual", "refId": "B"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "bytes"}}
+    },
+    {
+      "id": 14,
+      "type": "timeseries",
+      "title": "Backend CPU and file descriptors",
+      "description": "How much CPU the platform is using, and how many file descriptors it holds open. A descriptor count climbing without bound is a connection leak.",
+      "gridPos": {"h": 7, "w": 12, "x": 0, "y": 34},
+      "targets": [
+        {"expr": "rate(process_cpu_seconds_total[5m])", "legendFormat": "cpu cores", "refId": "A"},
+        {"expr": "process_open_fds", "legendFormat": "open fds", "refId": "B"}
+      ],
+      "fieldConfig": {"defaults": {"decimals": 3}}
+    },
+    {
+      "id": 15,
+      "type": "timeseries",
+      "title": "Scrape health",
+      "description": "Whether each scrape target is answering. A target that has stopped being scraped is a dashboard quietly lying.",
+      "gridPos": {"h": 7, "w": 12, "x": 12, "y": 34},
+      "targets": [
+        {"expr": "up", "legendFormat": "{{job}}", "refId": "A"}
+      ],
+      "fieldConfig": {"defaults": {"min": 0, "max": 1}}
     }
   ]
 }

@@ -3,12 +3,18 @@
 # Three scrape jobs:
 #
 #   fuel-backend   the platform's own metrics
-#   cadvisor       container CPU and memory
+#   node-exporter  the host's CPU and memory
 #   prometheus     Prometheus's own scrape health
 #
 # The alert rules in ``alerts.yml`` are loaded from the same directory, so a
 # rule is part of the code rather than something clicked into the UI at 2am
 # during a demo.
+#
+# **Why node-exporter and not cAdvisor.** cAdvisor's ``/api/v1.3/docker``
+# endpoint returns ``{}`` in this environment, so Prometheus received one
+# host-level series with the id ``/`` and no per-container breakdown. It
+# also cost 384 MB. node-exporter reads the kernel's own counters — the
+# same numbers ``free`` and ``top`` report — for 32 MB, and it works.
 
 global:
   scrape_interval: 15s
@@ -29,14 +35,15 @@ scrape_configs:
           service: fuel-backend
           environment: docker-compose
 
-  # Container CPU and memory. cAdvisor reads the Docker daemon's own
-  # counters, so no extra instrumentation is needed inside the application.
-  - job_name: cadvisor
+  # The host's CPU, memory, disk and network. node-exporter reads the
+  # kernel's counters through a read-only mount of the host's root, so
+  # the numbers are the host's and not the container's.
+  - job_name: node
     metrics_path: /metrics
     static_configs:
-      - targets: ["cadvisor:8080"]
+      - targets: ["node-exporter:9100"]
         labels:
-          service: cadvisor
+          service: node-exporter
 
   - job_name: prometheus
     static_configs:

@@ -191,41 +191,93 @@ groups:
             from the rule-based predictor and is flagged for human review.
 
   # ---------------------------------------------------------------------------
-  # The container itself.
+  # The machine the platform runs on.
+  #
+  # cAdvisor is not used: its Docker view returns nothing in this
+  # environment and it cost 384 MB. node-exporter reads the kernel's own
+  # counters for the host, and the backend publishes its own cgroup limit
+  # for the container.
   # ---------------------------------------------------------------------------
   - name: system
     rules:
       - alert: ContainerHighMemory
-        expr: >-
-          sum by (name) (
-            container_memory_working_set_bytes{name!=""}
-          ) / sum by (name) (
-            container_spec_memory_limit_bytes{name!=""}
-          ) > 0.85
+        expr: container_memory_fraction > 0.85
         for: 5m
         labels:
           severity: warning
           component: system
         annotations:
-          summary: "A container is using more than 85% of its memory limit."
+          summary: "The backend container is using more than 85% of its memory limit."
           description: >-
-            The backend or the simulator is close to its memory limit and will
-            be killed by the orchestrator if it keeps growing.
+            The backend is close to the memory ceiling Docker enforces on it,
+            and will be killed if it keeps growing. This is the number the
+            orchestrator uses, read from the container's own cgroup.
 
-      - alert: ContainerHighCPU
+      - alert: HostMemoryHigh
         expr: >-
-          sum by (name) (
-            rate(container_cpu_usage_seconds_total{name!=""}[5m])
-          ) > 1.5
+          100 * (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) > 90
         for: 5m
         labels:
           severity: warning
           component: system
         annotations:
-          summary: "A container is using more than 1.5 CPUs."
+          summary: "The host is using more than 90% of its memory."
           description: >-
-            Sustained high CPU usually means the platform is retrying hard
-            against a dependency that is failing.
+            The machine is shared with other projects' stacks. At this level
+            the next stack to start will push the host into swap, which is
+            what makes the desktop feel frozen.
+
+      - alert: HostDiskHigh
+        expr: >-
+          100 * (1 - (node_filesystem_avail_bytes{fstype!="tmpfs"} / node_filesystem_size_bytes{fstype!="tmpfs"})) > 85
+        for: 5m
+        labels:
+          severity: warning
+          component: system
+        annotations:
+          summary: "A filesystem on the host is more than 85% full."
+          description: >-
+            A full disk stalls the Docker daemon itself, and every service on
+            the machine with it. Every container here rotates its logs, so
+            this is more likely to be something outside this stack.
+
+      - alert: HostLoadHigh
+        expr: node_load1 / count(count(node_cpu_seconds_total) by (cpu)) > 1
+        for: 10m
+        labels:
+          severity: warning
+          component: system
+        annotations:
+          summary: "The host's load average is above its core count."
+          description: >-
+            The scheduler is the bottleneck, not any one service. Every
+            measurement taken at this load level is not comparable with one
+            taken on an idle machine.
+
+      - alert: BackendHighCPU
+        expr: rate(process_cpu_seconds_total[5m]) > 1.0
+        for: 10m
+        labels:
+          severity: warning
+          component: backend
+        annotations:
+          summary: "The backend is using more than one CPU core."
+          description: >-
+            Sustained high CPU usually means the platform is working hard
+            against a dependency that is failing, or is retrying hard.
+
+      - alert: FileDescriptorLeak
+        expr: process_open_fds > 200
+        for: 10m
+        labels:
+          severity: warning
+          component: backend
+        annotations:
+          summary: "The backend is holding more than 200 file descriptors."
+          description: >-
+            A descriptor count that climbs without bound is a connection
+            leak. The simulator's connection pool is small, and leaking
+            connections to it is how the platform ends up exhausting it.
 
       - alert: PrometheusNotScraping
         expr: up{job="prometheus"} == 0
@@ -236,3 +288,30 @@ groups:
         annotations:
           summary: "Prometheus is not scraping itself."
           description: "The observability stack is not working; the dashboards are blind."
+
+      - alert: NodeExporterDown
+        expr: up{job="node"} == 0
+        for: 2m
+        labels:
+          severity: warning
+          component: observability
+        annotations:
+          summary: "node-exporter is not answering Prometheus."
+          description: >-
+            The System dashboard has no host numbers to show. The backend's
+            own metrics are still being scraped.
+
+      - alert: PrometheusStorageHigh
+        expr: prometheus_tsdb_storage_blocks_bytes > 400 * 1024 * 1024
+        for: 5m
+        labels:
+          severity: warning
+          component: observability
+        annotations:
+          summary: "Prometheus's time series store is over 400 MB."
+          description: >-
+            Prometheus keeps two days and 500 MB here, so this is the
+            retention limit approaching. It is bounded on purpose: an
+            unbounded Prometheus eventually fills the disk, and a full disk
+            stalls the Docker daemon for every stack on the machine.
+

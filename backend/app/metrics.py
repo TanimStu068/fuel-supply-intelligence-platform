@@ -305,6 +305,77 @@ DECISIONS_PER_MINUTE = Gauge(
     "Allocation recommendations proposed in the last minute.",
 )
 
+#: The container's memory limit, in bytes, as the kernel reports it.
+#:
+#: cAdvisor used to provide this, but its Docker view is broken in this
+#: environment (``/api/v1.3/docker`` returns ``{}``), and it cost 384 MB
+#: to run. The container can read its own cgroup limit instead — the same
+#: number Docker enforces — so the "how close is this container to being
+#: killed" alert works without cAdvisor.
+CONTAINER_MEMORY_LIMIT_BYTES = Gauge(
+    "container_memory_limit_bytes",
+    "The memory limit the orchestrator enforces on this container.",
+)
+
+#: The container's memory working set, in bytes.
+CONTAINER_MEMORY_USAGE_BYTES = Gauge(
+    "container_memory_usage_bytes",
+    "This container's memory working set.",
+)
+
+#: The share of the container's memory limit that is in use.
+CONTAINER_MEMORY_FRACTION = Gauge(
+    "container_memory_fraction",
+    "This container's memory working set as a share of its limit.",
+)
+
+
+def _read_cgroup_value(path: str) -> int | None:
+    """Read one number out of the cgroup files, or ``None`` if it is not there.
+
+    cgroup v2 puts the limit in ``memory.max`` and the current usage in
+    ``memory.current``; cgroup v1 uses ``memory.limit_in_bytes`` and
+    ``memory.usage_in_bytes``. Both are read, because which one is in use
+    depends on the host's kernel and not on this application.
+    """
+    try:
+        with open(path, encoding="utf-8") as handle:
+            raw = handle.read().strip()
+    except OSError:
+        return None
+    if not raw or raw == "max":
+        return None
+    try:
+        value = int(raw)
+    except ValueError:
+        return None
+    # cgroup v1 reports "no limit" as a huge number rather than a keyword.
+    if value <= 0 or value >= 2**62:
+        return None
+    return value
+
+
+def publish_container_memory() -> None:
+    """Publish this container's memory usage and limit.
+
+    Called on a timer by the metrics middleware. The numbers come from the
+    container's own cgroup, so they are the numbers the orchestrator will
+    actually use when it decides to kill this process.
+    """
+    limit = _read_cgroup_value("/sys/fs/cgroup/memory.max")
+    if limit is None:
+        limit = _read_cgroup_value("/sys/fs/cgroup/memory/memory.limit_in_bytes")
+    usage = _read_cgroup_value("/sys/fs/cgroup/memory.current")
+    if usage is None:
+        usage = _read_cgroup_value("/sys/fs/cgroup/memory/memory.usage_in_bytes")
+
+    if limit is not None:
+        CONTAINER_MEMORY_LIMIT_BYTES.set(limit)
+    if usage is not None:
+        CONTAINER_MEMORY_USAGE_BYTES.set(usage)
+    if limit and usage is not None:
+        CONTAINER_MEMORY_FRACTION.set(round(usage / limit, 4))
+
 
 def install_metrics_middleware(app: FastAPI) -> None:
     """Attach the metrics middleware and the ``/metrics`` route to an app."""
@@ -326,6 +397,7 @@ def install_metrics_middleware(app: FastAPI) -> None:
                 HTTP_REQUEST_DURATION.labels(method=method, path=path).observe(
                     time.perf_counter() - started
                 )
+                publish_container_memory()
 
     app.add_middleware(_MetricsMiddleware)
     app.add_api_route(
