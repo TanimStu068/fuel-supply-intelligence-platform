@@ -408,10 +408,14 @@ guide is the real API.
 The simulator stores its world in SQLite behind a **connection pool of five
 connections plus ten in overflow**. When that pool is exhausted — usually by
 too many concurrent heavy reads — the simulator's own health endpoint cannot
-get a connection either, so it stops answering entirely. A simulator that has
-answered `500`s or timed out on `/v1/health` will not recover on its own.
+get a connection either, so it stops answering for a while.
 
-The fix is a restart, followed by a reset:
+**The platform recovers on its own.** Once the burst stops, the pool drains —
+slowly, because every request already queued on it waits out the pool's own
+thirty-second timeout first — the breaker's probe succeeds, it closes, and the
+next sync cycle restores a fresh world. In the recorded drill the platform
+recovered by itself in **111 seconds**, with no restart of anything. If the
+simulator does *not* come back, the fix is a restart followed by a reset:
 
 ```bash
 # 1. Restart the simulator. This clears the wedged pool.
@@ -427,9 +431,9 @@ curl -s -X POST http://localhost:8100/admin/reset | jq
 curl -s -X POST http://localhost:8100/admin/run | jq
 ```
 
-The platform does **not** need to be restarted. Its circuit breaker opens on
-the failed calls, and it closes again by itself once the simulator answers:
-the breaker probes after `CIRCUIT_BREAKER_RECOVERY_SECONDS`, the sync
+The platform does **not** need to be restarted either way. Its circuit breaker
+opens on the failed calls, and it closes again by itself once the simulator
+answers: the breaker probes after `CIRCUIT_BREAKER_RECOVERY_SECONDS`, the sync
 succeeds, and the degraded flag clears. In the recorded drill the platform
 was serving cached state within about ten seconds of the simulator coming back.
 

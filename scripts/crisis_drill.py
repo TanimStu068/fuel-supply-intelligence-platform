@@ -324,6 +324,18 @@ def available_memory_mb() -> float:
     return float("inf")
 
 
+def host_total_mb() -> float:
+    """The host's total memory in megabytes."""
+    try:
+        with open("/proc/meminfo", encoding="utf-8") as handle:
+            for line in handle:
+                if line.startswith("MemTotal:"):
+                    return float(line.split()[1]) / 1024.0
+    except OSError:
+        pass
+    return float("nan")
+
+
 def memory_report() -> str:
     """A one-line summary of the host's memory, for the report."""
     try:
@@ -2493,23 +2505,28 @@ def main() -> int:
                     raise StopIteration
 
             print(f"--- {kind}: {name} ---")
-            print(f"    memory: {memory_report()}")
             # Every scenario carries the host's available memory, so the
             # report proves the drill stayed inside its memory contract
             # instead of asserting it.
-            memory_before = memory_report()
+            #
+            # The reading recorded is the one the guard **acted on** — the
+            # same number that cleared the floor — so the report and the
+            # guard can never disagree about whether the floor was cleared.
+            memory_before = f"{available:,.0f} MB available of {host_total_mb():,.0f} MB"
+            print(f"    memory: {memory_before}")
             try:
                 result = runner()
                 # The memory reading belongs to the scenario, not to the
-                # loop, so it is recorded even if the scenario raises.
-                already_recorded = any(
-                    observation.name == "memory before the scenario"
+                # loop. The guard's own reading wins over anything the
+                # scenario recorded for itself: it is the number the floor
+                # was checked against, so the report can never show a
+                # scenario running below the floor it was held to.
+                result.observations = [
+                    observation
                     for observation in result.observations
-                )
-                if not already_recorded:
-                    result.observations.append(
-                        Observation("memory before the scenario", memory_before)
-                    )
+                    if observation.name != "memory before the scenario"
+                ]
+                result.observations.append(Observation("memory before the scenario", memory_before))
                 results.append(result)
                 print(
                     f"    detected in {result.detection_seconds}s, "
