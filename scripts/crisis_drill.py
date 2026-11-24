@@ -1384,6 +1384,82 @@ class Drill:
         prediction.recovery_seconds = 0.0
         results.append(prediction)
 
+        # --- the prediction layer, broken rather than switched off ---------
+        #
+        # The kill-switch is a *decision*: the model is fine and has been
+        # told not to be used. A fault is different: the model is broken
+        # and the platform has to notice on its own. Both have to end up
+        # in the same place — the rule-based predictor, with every
+        # forecast flagged for a human — but the *reason* on the forecast
+        # is what tells them apart, and that is the evidence this
+        # scenario exists to record.
+        broken = ScenarioResult(
+            kind="dependency failure",
+            name="Prediction layer broken",
+            what=(
+                "The learned model is made to raise on every forecast — the "
+                "way a broken model raises — so the platform has to notice the "
+                "failure by itself rather than being told about it."
+            ),
+            expects=(
+                "every forecast comes from the rule-based predictor, is flagged "
+                "for a human, and the fallback reason names the failure"
+            ),
+            started_at=datetime.now(UTC),
+        )
+        broken.observations.append(
+            Observation("baseline status", self.health().get("status", "unknown"))
+        )
+        # The learned model has to be *in service* before it can be
+        # broken: a model that was never trained falls back anyway, so
+        # injecting a fault into it would measure nothing. The drill
+        # trains it first, and only then breaks it.
+        trained = self._train_model()
+        broken.observations.append(
+            Observation("the learned model was trained", trained)
+        )
+        broken.observations.append(
+            Observation(
+                "active model before",
+                self._model_status().get("active_model", "unknown"),
+            )
+        )
+        broken.observations.append(
+            Observation("the forecast before", self._forecast_summary())
+        )
+
+        print("    breaking the learned model...")
+        injected = self._inject_prediction_fault("predict_error")
+        broken.observations.append(
+            Observation("the fault was accepted", injected)
+        )
+        time.sleep(12)
+
+        broken.observations.append(
+            Observation("the forecast with the model broken", self._forecast_summary())
+        )
+        broken.observations.append(
+            Observation(
+                "the decision engine's fallback reason",
+                str(self.get("/api/recommendations").get("fallback_reason") or "—"),
+            )
+        )
+        broken.served_during_incident = self._check_serving()
+        broken.recommendation = self._summarise_recommendations(broken.started_at)
+        broken.detected_by = "the model raised and the selector fell back on its own"
+        broken.detection_seconds = 0.0
+
+        print("    repairing the learned model...")
+        self._inject_prediction_fault(None)
+        time.sleep(10)
+
+        broken.observations.append(
+            Observation("the forecast after recovery", self._forecast_summary())
+        )
+        broken.recovered = self._prediction_fault() is None
+        broken.recovery_seconds = 0.0
+        results.append(broken)
+
         return results
 
     def _cached_state_summary(self) -> str:
@@ -1457,6 +1533,52 @@ class Drill:
     def _fallback_count(self) -> float:
         """How many forecasts the kill-switch pushed onto the rule-based fallback."""
         return self._backend_counter("ml_kill_switch_fallbacks_total")
+
+    def _inject_prediction_fault(self, fault: str | None) -> bool:
+        """Break the learned model on purpose, or repair it."""
+        try:
+            response = self._client.post(
+                f"{BACKEND_URL}/api/model/fault",
+                json={"fault": fault},
+                timeout=15,
+            )
+            if response.status_code != 200:
+                return False
+            return response.json().get("prediction_fault") == fault
+        except Exception:
+            return False
+
+    def _train_model(self) -> str:
+        """Train the learned model, so there is a model to break.
+
+        Returns what the training endpoint said. The platform trains on
+        a schedule, but a drill cannot wait for the schedule: the model
+        has to be in service *now* for the fault that follows to be a
+        real fault.
+        """
+        try:
+            response = self._client.post(f"{BACKEND_URL}/api/model/train", timeout=120)
+            if response.status_code != 200:
+                return f"the training request failed with {response.status_code}"
+            payload = response.json()
+            if not payload.get("trained"):
+                return f"not trained: {payload.get('reason', 'unknown reason')}"
+            return (
+                f"trained on {payload.get('training_rows')} rows, "
+                f"validation MAE {payload.get('validation_mae')} L"
+            )
+        except Exception as exc:
+            return f"the training request failed: {exc}"
+
+    def _prediction_fault(self) -> str | None:
+        """The injected prediction fault, if one is active."""
+        try:
+            response = self._client.get(f"{BACKEND_URL}/api/model-status", timeout=15)
+            if response.status_code != 200:
+                return None
+            return response.json().get("prediction_fault")
+        except Exception:
+            return None
 
     def _kill_switch(self, enabled: bool) -> bool:
         """Turn the ML kill-switch on or off. Returns whether it was accepted."""
