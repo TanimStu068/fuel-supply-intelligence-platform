@@ -1372,6 +1372,20 @@ class Drill:
         self._kill_switch(False)
         time.sleep(10)
 
+        # Turning the kill-switch off is not the same as the model coming
+        # back: the model has to be *judged* again, and the platform's own
+        # selector may still keep it switched off. The drill gives it the
+        # same fair chance it gave the model before the switch — a few
+        # retrains — and records what it found, because "the kill-switch is
+        # off" and "the model is in service" are two different claims.
+        back_in_service, back_attempts = self._ensure_model_in_service()
+        prediction.observations.append(
+            Observation("the model after the kill-switch came off", back_in_service)
+        )
+        prediction.observations.append(
+            Observation("how hard it was to earn the model back", back_attempts)
+        )
+
         model_status = self._model_status()
         prediction.observations.append(
             Observation("active model after", model_status.get("active_model", "unknown"))
@@ -1455,6 +1469,18 @@ class Drill:
         self._inject_prediction_fault(None)
         time.sleep(10)
 
+        # Clearing the fault is not the same as the model coming back: the
+        # platform has to re-evaluate, and the model has to be judged
+        # again. The drill gives it the same fair chance it gave the model
+        # before the fault — a few retrains — rather than assuming it came
+        # back.
+        back_in_service, back_attempts = self._ensure_model_in_service()
+        broken.observations.append(
+            Observation("the model after the fault was cleared", back_in_service)
+        )
+        broken.observations.append(
+            Observation("how hard it was to earn the model back", back_attempts)
+        )
         broken.observations.append(
             Observation("the forecast after recovery", self._forecast_summary())
         )
