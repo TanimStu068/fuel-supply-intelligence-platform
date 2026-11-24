@@ -1,0 +1,175 @@
+[
+  {
+    "name": "dashboard",
+    "title": "The dashboard's read path",
+    "description": "Ten endpoints, the way the operator's dashboard polls them. This is the read path that every open browser tab drives.",
+    "started_at": "2026-11-24T13:02:18.270543+00:00",
+    "finished_at": "2026-11-24T13:03:53.097316+00:00",
+    "elapsed_seconds": 94.83,
+    "requests": 28427,
+    "throughput_rps": 299.78,
+    "error_rate": 0.0,
+    "conflicts": 0,
+    "latency": {
+      "count": 28427,
+      "average_ms": 73.59,
+      "p50_ms": 62.1,
+      "p95_ms": 210.63,
+      "p99_ms": 301.88,
+      "min_ms": 0.85,
+      "max_ms": 557.18
+    },
+    "stages": [
+      {
+        "users": 1,
+        "seconds": 15,
+        "requests": 1906,
+        "rps": 117.92,
+        "p50_ms": 3.27,
+        "p95_ms": 23.12,
+        "p99_ms": 115.11,
+        "errors": 0
+      },
+      {
+        "users": 5,
+        "seconds": 20,
+        "requests": 4697,
+        "rps": 221.88,
+        "p50_ms": 11.02,
+        "p95_ms": 91.39,
+        "p99_ms": 169.59,
+        "errors": 0
+      },
+      {
+        "users": 20,
+        "seconds": 25,
+        "requests": 8919,
+        "rps": 340.66,
+        "p50_ms": 37.99,
+        "p95_ms": 144.94,
+        "p99_ms": 233.86,
+        "errors": 0
+      },
+      {
+        "users": 50,
+        "seconds": 30,
+        "requests": 12905,
+        "rps": 412.32,
+        "p50_ms": 87.04,
+        "p95_ms": 253.4,
+        "p99_ms": 331.72,
+        "errors": 0
+      }
+    ],
+    "by_endpoint": [
+      {
+        "endpoint": "/api/service-health",
+        "requests": 2803,
+        "average_ms": 147.46,
+        "p50_ms": 150.34,
+        "p95_ms": 315.69,
+        "p99_ms": 380.31,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/alerts",
+        "requests": 2858,
+        "average_ms": 131.33,
+        "p50_ms": 131.6,
+        "p95_ms": 271.75,
+        "p99_ms": 338.51,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations",
+        "requests": 2842,
+        "average_ms": 65.26,
+        "p50_ms": 61.3,
+        "p95_ms": 153.83,
+        "p99_ms": 198.55,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/risk",
+        "requests": 2861,
+        "average_ms": 59.89,
+        "p50_ms": 58.14,
+        "p95_ms": 152.07,
+        "p99_ms": 200.84,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/events",
+        "requests": 2829,
+        "average_ms": 58.78,
+        "p50_ms": 52.14,
+        "p95_ms": 149.69,
+        "p99_ms": 201.03,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/routes",
+        "requests": 2866,
+        "average_ms": 56.45,
+        "p50_ms": 55.61,
+        "p95_ms": 145.46,
+        "p99_ms": 197.05,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/depots",
+        "requests": 2869,
+        "average_ms": 54.27,
+        "p50_ms": 50.55,
+        "p95_ms": 144.58,
+        "p99_ms": 199.0,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/supply-arrivals",
+        "requests": 2820,
+        "average_ms": 56.54,
+        "p50_ms": 51.88,
+        "p95_ms": 140.83,
+        "p99_ms": 198.11,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/stations",
+        "requests": 2869,
+        "average_ms": 53.43,
+        "p50_ms": 49.19,
+        "p95_ms": 137.43,
+        "p99_ms": 211.2,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/allocations",
+        "requests": 2810,
+        "average_ms": 53.37,
+        "p50_ms": 49.61,
+        "p95_ms": 133.09,
+        "p99_ms": 199.98,
+        "error_rate": 0.0
+      }
+    ],
+    "container_cpu_cores": [
+      0.06643333333333333,
+      0.06674166666666667,
+      0.06208333333333333,
+      0.06355000000000001
+    ],
+    "container_memory_bytes": [
+      106115891.2,
+      102424903.68,
+      112302489.6,
+      108213043.2
+    ],
+    "host_load_average": [
+      3.14306640625,
+      3.7265625,
+      3.341796875,
+      3.7841796875
+    ]
+  }
+]

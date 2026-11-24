@@ -1,0 +1,175 @@
+[
+  {
+    "name": "dashboard",
+    "title": "The dashboard's read path",
+    "description": "Ten endpoints, the way the operator's dashboard polls them. This is the read path that every open browser tab drives.",
+    "started_at": "2026-11-24T13:14:02.276383+00:00",
+    "finished_at": "2026-11-24T13:15:33.032081+00:00",
+    "elapsed_seconds": 90.76,
+    "requests": 13072,
+    "throughput_rps": 144.04,
+    "error_rate": 0.0,
+    "conflicts": 0,
+    "latency": {
+      "count": 13072,
+      "average_ms": 160.3,
+      "p50_ms": 90.09,
+      "p95_ms": 487.84,
+      "p99_ms": 840.54,
+      "min_ms": 0.91,
+      "max_ms": 1393.57
+    },
+    "stages": [
+      {
+        "users": 1,
+        "seconds": 15,
+        "requests": 1115,
+        "rps": 73.83,
+        "p50_ms": 3.89,
+        "p95_ms": 67.25,
+        "p99_ms": 140.98,
+        "errors": 0
+      },
+      {
+        "users": 5,
+        "seconds": 20,
+        "requests": 2673,
+        "rps": 133.38,
+        "p50_ms": 34.04,
+        "p95_ms": 110.81,
+        "p99_ms": 174.28,
+        "errors": 0
+      },
+      {
+        "users": 20,
+        "seconds": 25,
+        "requests": 4332,
+        "rps": 172.31,
+        "p50_ms": 73.36,
+        "p95_ms": 351.28,
+        "p99_ms": 502.99,
+        "errors": 0
+      },
+      {
+        "users": 50,
+        "seconds": 30,
+        "requests": 4952,
+        "rps": 162.56,
+        "p50_ms": 266.47,
+        "p95_ms": 728.08,
+        "p99_ms": 1008.04,
+        "errors": 0
+      }
+    ],
+    "by_endpoint": [
+      {
+        "endpoint": "/api/service-health",
+        "requests": 1271,
+        "average_ms": 265.01,
+        "p50_ms": 145.74,
+        "p95_ms": 945.01,
+        "p99_ms": 1174.93,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/alerts",
+        "requests": 1316,
+        "average_ms": 307.73,
+        "p50_ms": 232.3,
+        "p95_ms": 790.44,
+        "p99_ms": 946.49,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/recommendations",
+        "requests": 1310,
+        "average_ms": 223.11,
+        "p50_ms": 240.15,
+        "p95_ms": 453.06,
+        "p99_ms": 560.94,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/events",
+        "requests": 1306,
+        "average_ms": 175.14,
+        "p50_ms": 154.41,
+        "p95_ms": 414.16,
+        "p99_ms": 474.08,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/supply-arrivals",
+        "requests": 1293,
+        "average_ms": 140.02,
+        "p50_ms": 90.34,
+        "p95_ms": 406.97,
+        "p99_ms": 467.48,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/allocations",
+        "requests": 1283,
+        "average_ms": 114.53,
+        "p50_ms": 58.95,
+        "p95_ms": 394.94,
+        "p99_ms": 469.65,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/risk",
+        "requests": 1318,
+        "average_ms": 113.81,
+        "p50_ms": 41.64,
+        "p95_ms": 361.17,
+        "p99_ms": 437.06,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/routes",
+        "requests": 1323,
+        "average_ms": 99.77,
+        "p50_ms": 38.82,
+        "p95_ms": 335.59,
+        "p99_ms": 429.21,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/depots",
+        "requests": 1324,
+        "average_ms": 85.57,
+        "p50_ms": 36.61,
+        "p95_ms": 309.73,
+        "p99_ms": 418.03,
+        "error_rate": 0.0
+      },
+      {
+        "endpoint": "/api/stations",
+        "requests": 1328,
+        "average_ms": 82.37,
+        "p50_ms": 38.14,
+        "p95_ms": 299.88,
+        "p99_ms": 428.7,
+        "error_rate": 0.0
+      }
+    ],
+    "container_cpu_cores": [
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "container_memory_bytes": [
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "host_load_average": [
+      2.296875,
+      2.359375,
+      2.54833984375,
+      2.91015625
+    ]
+  }
+]
