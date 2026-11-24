@@ -84,6 +84,15 @@ SCENARIO_PAUSE_SECONDS = float(os.getenv("DRILL_SCENARIO_PAUSE", "12"))
 #: it proves nothing, so this is a stop and not a warning.
 MIN_AVAILABLE_MEMORY_MB = float(os.getenv("DRILL_MIN_AVAILABLE_MB", "1024"))
 
+#: How long to wait for the host's memory to climb back over the floor.
+#:
+#: The floor is a hard rule: the drill never runs a scenario below it. But
+#: a machine that is briefly tight is not a machine that is out of memory —
+#: a page cache gets reclaimed, a process exits, and the number comes back.
+#: Stopping the whole run on the first dip would throw away every scenario
+#: that had not run yet, over a measurement that was about to change.
+MEMORY_WAIT_SECONDS = float(os.getenv("DRILL_MEMORY_WAIT_SECONDS", "300"))
+
 #: The range a fault may last. Long enough to be a real incident, short
 #: enough that the drill is not an outage of its own making.
 MIN_FAULT_SECONDS = 10
@@ -1306,8 +1315,11 @@ class Drill:
         # learned model was actually the active one before the switch.
         trained = self._train_model()
         prediction.observations.append(Observation("the learned model was trained", trained))
-        in_service = self._wait_for_model_in_service()
+        in_service, attempts = self._ensure_model_in_service()
         prediction.observations.append(Observation("the learned model was in service", in_service))
+        prediction.observations.append(
+            Observation("how hard it was to get the model in service", attempts)
+        )
         prediction.observations.append(
             Observation("active model before", self._model_status().get("active_model", "unknown"))
         )
@@ -1407,8 +1419,11 @@ class Drill:
         # trains it first, and only then breaks it.
         trained = self._train_model()
         broken.observations.append(Observation("the learned model was trained", trained))
-        in_service = self._wait_for_model_in_service()
+        in_service, attempts = self._ensure_model_in_service()
         broken.observations.append(Observation("the learned model was in service", in_service))
+        broken.observations.append(
+            Observation("how hard it was to get the model in service", attempts)
+        )
         broken.observations.append(
             Observation(
                 "active model before",
@@ -1589,16 +1604,56 @@ class Drill:
         forecasts on screen are still the old ones. A drill that read them
         immediately would measure the *previous* evaluation, not the one
         the kill-switch or the fault is about to change.
+
+        The wait reads the **forecast** endpoint rather than the model
+        status, because the forecast is what the operator actually looks
+        at: the model status flips as soon as the model is trained, while
+        the forecast only changes once the platform has re-evaluated.
         """
         deadline = time.monotonic() + timeout
         last = "never re-evaluated"
         while time.monotonic() < deadline:
-            status = self._model_status()
-            last = str(status.get("active_model", "unknown"))
-            if last == "learned":
+            models = self._forecast_models()
+            last = ", ".join(sorted(models)) if models else "no forecasts"
+            if models == {"learned"}:
                 return last
             time.sleep(3)
         return f"still '{last}' after {timeout:.0f}s"
+
+    def _ensure_model_in_service(self, max_attempts: int = 4) -> tuple[str, str]:
+        """Get the learned model into service, and say how hard it was.
+
+        The kill-switch and the injected fault only mean something against
+        a model that the platform was *actually using*. That is not
+        guaranteed: the platform judges the learned model against the
+        rule-based baseline on every retrain, and the verdict moves as the
+        history grows — the same training set can win on one retrain and
+        lose on the next.
+
+        So the drill retrains until the forecasts come from the learned
+        model, and it records how many attempts that took. The number is
+        evidence in its own right: it says how often the platform's own
+        selector would have kept the model switched off.
+
+        Returns ``(state, attempts)``, where ``state`` is what the
+        forecasts are using.
+        """
+        for attempt in range(1, max_attempts + 1):
+            self._train_model()
+            state = self._wait_for_model_in_service(timeout=45.0)
+            if state == "learned":
+                return state, f"in service after {attempt} training attempt(s)"
+            time.sleep(5)
+        return state, f"still '{state}' after {max_attempts} training attempts"
+
+    def _forecast_models(self) -> set[str]:
+        """Which predictors produced the forecasts currently on screen."""
+        try:
+            payload = self.get("/api/forecast")
+        except Exception:
+            return set()
+        forecasts = payload.get("forecasts") or []
+        return {str(forecast.get("model", "unknown")) for forecast in forecasts}
 
     def _prediction_fault(self) -> str | None:
         """The injected prediction fault, if one is active."""
@@ -2384,12 +2439,30 @@ def main() -> int:
 
             available = available_memory_mb()
             if available < MIN_AVAILABLE_MEMORY_MB:
-                print(
-                    f"!! stopping before '{name}': only {available:,.0f} MB of "
-                    f"memory is available (the floor is {MIN_AVAILABLE_MEMORY_MB:,.0f} MB)"
-                )
-                stopped_for_memory = True
-                raise StopIteration
+                # The host is tight, but memory comes back: a page cache
+                # that has been reclaimed, a process that has exited. The
+                # drill waits for the floor to clear before giving up,
+                # because stopping the whole run over a transient dip
+                # would throw away the scenarios that have not run yet.
+                #
+                # It still never runs a scenario below the floor. The wait
+                # has a budget: a machine that stays tight needs a human,
+                # not a drill that keeps pushing.
+                deadline = time.monotonic() + MEMORY_WAIT_SECONDS
+                while available < MIN_AVAILABLE_MEMORY_MB and time.monotonic() < deadline:
+                    time.sleep(15)
+                    available = available_memory_mb()
+                    print(
+                        f"   ... waiting for memory: {available:,.0f} MB available "
+                        f"(the floor is {MIN_AVAILABLE_MEMORY_MB:,.0f} MB)"
+                    )
+                if available < MIN_AVAILABLE_MEMORY_MB:
+                    print(
+                        f"!! stopping before '{name}': only {available:,.0f} MB of "
+                        f"memory is available (the floor is {MIN_AVAILABLE_MEMORY_MB:,.0f} MB)"
+                    )
+                    stopped_for_memory = True
+                    raise StopIteration
 
             print(f"--- {kind}: {name} ---")
             print(f"    memory: {memory_report()}")
