@@ -2323,9 +2323,9 @@ def render_report(
     lines.append("## The restart-and-reset procedure")
     lines.append("")
     lines.append(
-        "When the simulator's connection pool is exhausted it stops answering "
-        "until it is restarted. The procedure is three commands, and it is "
-        "also the documented way to get a clean world between demo runs."
+        "When the simulator's connection pool is exhausted it stops answering. "
+        "The procedure is three commands, and it is also the documented way to "
+        "get a clean world between demo runs."
     )
     lines.append("")
     lines.append("```bash")
@@ -2343,9 +2343,11 @@ def render_report(
         "**The platform needs none of this to recover from a pool "
         "exhaustion on its own** — the connection-pool scenario above shows "
         "it recovering by itself, with the circuit breaker closing and the "
-        "cache going fresh again. The procedure is the *fallback* for the "
-        "case where the simulator does not come back, and it is what the "
-        "demo script uses to get a clean world between runs."
+        "cache going fresh again. Recovery is slow, because the pool's "
+        "backlog has to drain through the pool's own thirty-second timeout, "
+        "but it is automatic. The procedure is the *fallback* for the case "
+        "where the simulator does not come back, and it is what the demo "
+        "script uses to get a clean world between runs."
     )
     lines.append("")
     lines.append(

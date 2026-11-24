@@ -3,7 +3,7 @@
 **Date:** Day 6 of 7 · BUP CSE Fest 2026 Hackathon Finals
 **Goal:** prove resilience and observability *with evidence* — the judges score these at 15% and 10%, and a claim without a measurement scores nothing.
 
-**The result in one line:** the platform now breaks on purpose and puts itself back together — **14 of 14 crisis, fault and dependency scenarios recovered automatically**, with the evidence in `docs/resilience-report.md` and the Grafana screenshots beside it; a Prometheus + Grafana stack provisions five dashboards and twenty-one alert rules as code; and the load test found a real bottleneck (a Python-side aggregate over a 928,005-row table) which, once computed in SQL, took the p99 from **30.0 s to 286 ms** and stopped the container being OOM-killed.
+**The result in one line:** the platform now breaks on purpose and puts itself back together — **17 of 17 crisis, fault and dependency scenarios recovered automatically**, with the evidence in `docs/resilience-report.md` and the Grafana screenshots beside it; a Prometheus + Grafana stack provisions five dashboards and twenty-one alert rules as code; the load test found a real bottleneck (a Python-side aggregate over a 928,005-row table) which, once computed in SQL, took the p99 from **30.0 s to 286 ms** and stopped the container being OOM-killed; and the drill itself turned up a **silent failure in the platform's event stream** — the platform believed it had a live feed long after the feed was gone — which is fixed and verified.
 
 
 ---
@@ -673,6 +673,303 @@ Blockers and risks
 | The simulator's faults surface on the polling interval | Detection takes up to 12 s for the fault scenarios | That is an upper bound: the drill polls every 2 s, and the platform's circuit breaker reacts faster. A faster path would be an SSE-driven fault signal |
 | The host is shared with other Docker stacks | 32 containers across 5 other projects had the machine at 203 MiB free and load average 13 | `scripts/stack_guard.sh` stops them, clears the restart policies, and applies a 1 GB limit to every container on the host; the compose file caps this stack's seven services at **1.5 GB in total** (417 MB measured), and the observability half sits behind a profile |
 | Locust is a heavy dependency | It could not be installed on the build machine | The measurements come from the standalone harness, which needs nothing the project does not already have; `locustfile.py` provides the same workloads for anyone who has Locust |
+
+---
+
+# Part 2 — The crisis drill, the dependency failures, and a real bug
+
+**Date:** Day 6 of 7, Part 2 of 3 · BUP CSE Fest 2026 Hackathon Finals
+
+Part 1 built the budget and the observability stack. This part runs the
+drill that the whole day exists for, and it found a bug that would have
+cost the platform its most important claim.
+
+**The result in one line:** **17 of 17 crisis, fault and dependency
+scenarios recovered automatically** — including the simulator's own
+connection-pool exhaustion, a stopped Postgres, and a deliberately broken
+prediction model — and the drill turned up **a silent failure in the
+platform's event stream**, where the platform believed it had a live feed
+long after the feed was gone.
+
+---
+
+The operating contract for this part
+
+The machine is shared with other projects, so the drills ran under a
+contract:
+
+* every container under **2 GB**, with the limits exactly as
+  `docker-compose.yml` sets them;
+* **only the core profile** — the monitoring profile stayed off for the
+  whole run, so nothing in the report depends on Prometheus or Grafana.
+  The counters are read from the backend's own `/metrics`;
+* `free -h` before **every** scenario, and the drill stops before a
+  scenario if the host has less than **1 GB** available;
+* **one scenario at a time**, with a 12-second pause between them, so a
+  crisis that is still resolving is never counted as the next crisis's
+  detection;
+* if anything became unresponsive: `docker compose down`, and say so.
+  `docker compose down -v` needs asking first.
+
+The available memory never fell below 1.4 GB during the run, so no
+scenario was skipped.
+
+---
+
+The simulator's connection pool, characterized
+
+The simulator keeps its world in SQLite behind a SQLAlchemy `QueuePool`
+of **five connections plus ten in overflow**, with a 30-second pool
+timeout. What exhausts it is *not* the event stream and *not* the
+latency fault — both of those were measured and neither holds a
+connection. What exhausts it is **concurrent heavy reads**:
+
+| Burst | Result |
+|---|---|
+| 17 concurrent `GET /v1/demand-history?limit=2000` | served in 4.2 s — no exhaustion |
+| 25–30 concurrent | requests hit the pool's own 30-second timeout |
+| 40 concurrent | 3 succeeded, 37 timed out |
+
+The simulator's log says it plainly:
+
+```
+sqlalchemy.exc.TimeoutError: QueuePool limit of size 5 overflow 10
+reached, connection timed out, timeout 30.00
+```
+
+Once the pool is exhausted the simulator's *own* health endpoint cannot
+get a connection either, so it stops answering — for a while.
+
+**How the backend degrades.** It never sees a 500 — it sees requests that
+stop answering. Its own request timeout fires, the circuit breaker opens
+after five consecutive failures, the sync service marks the cache
+degraded, and the API keeps serving the last-known world with its age and
+its reason. All five dashboard endpoints kept answering `200` throughout.
+
+**How it recovers.** The drill waits for the platform to recover on its
+own first, because that is the claim worth testing. The pool's backlog
+drains in waves — every request already queued on it waits out the
+pool's own thirty-second timeout first — so recovery is slow but
+automatic: on the recorded run the platform recovered **by itself in
+111 seconds**, with the breaker closed and the cache fresh again, and no
+restart was needed.
+
+Earlier runs did wedge, and the drill handled that too: when the pool
+stays wedged past its recovery budget, the drill runs the documented
+procedure (`docker compose restart simulator`, then `POST /admin/reset`,
+then `POST /admin/run`) and then measures the platform's own recovery —
+**9 seconds** after the simulator came back, the breaker had closed and
+the cache was fresh again. The drill runs the procedure as a *fallback*,
+not as the expected path, and the report says which one happened.
+
+The procedure is now written down in the [README](../README.md) as well
+as here, because it is also how you get a clean world between demo runs.
+
+---
+
+The drill itself
+
+`scripts/crisis_drill.py` runs the scenarios one at a time and records
+four numbers for each, because a resilience claim without them is just a
+claim: **detection time**, **the recommendation the platform made**, **the
+recovery time**, and **what the platform served during the incident**.
+
+| Scenario | Detected in | Recovery | Outcome |
+|---|---|---|---|
+| Baseline (the control) | 0.0s | 0.0s | RECOVERED |
+| Demand spike | 2.0s | 0.0s | RECOVERED |
+| Shipment delay | 2.0s | 0.0s | RECOVERED |
+| Depot constraint | 2.0s | 0.0s | RECOVERED |
+| Route disruption | 4.0s | 0.0s | RECOVERED |
+| Station outage | 2.0s | 0.0s | RECOVERED |
+| Supply shortfall | 2.0s | 0.0s | RECOVERED |
+| Combined crisis | 2.0s | 0.0s | RECOVERED |
+| Latency | 12.4s | 0.0s | RECOVERED |
+| Unavailable | 2.1s | 0.0s | RECOVERED |
+| Error rate | 2.1s | 0.0s | RECOVERED |
+| Stale data | 4.4s | 0.0s | RECOVERED |
+| Stream disconnect | 22.5s | 0.0s | RECOVERED |
+| Simulator connection-pool exhaustion | 18.1s | 111.4s | RECOVERED |
+| Database stopped | 0.1s | 2.0s | RECOVERED |
+| Prediction layer disabled | 0.0s | 0.0s | RECOVERED |
+| Prediction layer broken | 0.0s | 0.0s | RECOVERED |
+
+**17 of 17 recovered automatically.** None of them needed a restart of the
+backend. The full numbers, with the measurements behind each one, are in
+[`docs/resilience-report.md`](../resilience-report.md).
+
+Two measurements were wrong before they were right, and both mattered.
+
+The drill's own counter parser could not read an **unlabelled** sample:
+`sse_connections_total 10.0` has no braces to partition on, so the value
+was dropped and every unlabelled counter read as zero. The
+stream-disconnect scenario was reporting *"the event stream reconnected:
+no"* while the platform had reconnected twenty times. A drill that
+measures its own evidence wrongly is worse than no drill.
+
+The detection and recovery clocks started **after** each scenario's
+setup. A scenario that has to restart the simulator to close an
+established stream was reporting a detection time that excluded the
+restart — 0.0s where the honest answer is 22.5s. The clock now starts
+before the setup, because the setup is part of the incident.
+
+---
+
+The dependency failures
+
+**The database, stopped for under thirty seconds.** The Postgres
+container is stopped while the platform is serving, and then started
+again:
+
+| Measurement | During the outage | After the restart |
+|---|---|---|
+| Health status | `degraded` | `ok` |
+| Database component | `error` | `ok` |
+| Cached state | age 0.1s, **not degraded** | age 2.8s, not degraded |
+| The dashboard | all 5 endpoints answered 200 | all 5 answered 200 |
+| The platform process | **still up** | still up |
+
+The database was down for **16 seconds** and the platform recovered on
+its own **2.0 seconds** after it came back. It did not crash, it did not
+lose the cached state, and it did not pretend the database was there:
+`/health` answered `503` with the database marked `error`, which is the
+honest answer.
+
+**The prediction layer, in three shapes.** "The prediction component
+failed" has more than one meaning, and the platform handles each of them
+differently — the brief asks for the failure, so all three are drilled.
+
+The prediction component is a **module inside the backend**, so there is
+no container to stop. To show that the fallback takes over when the model
+*fails* — rather than when an operator has politely switched it off —
+the drill now breaks the model on purpose, with
+`POST /api/model/fault {"fault": "predict_error"}`. The model is
+trained first, because a model that was never trained falls back anyway,
+and a fault injected into it would measure nothing.
+
+| | Model | Flagged for a human | The forecast's reason |
+|---|---|---|---|
+| Before | `12× learned` | 0 of 12 | — |
+| Kill-switch on | `12× baseline` | **12 of 12** | *"the ml kill-switch is on: the learned model is disabled"* |
+| Model broken | `12× baseline` | **12 of 12** | *"the learned model failed to predict: an injected prediction fault"* |
+| After recovery | `12× learned` | 0 of 12 | — |
+
+The two are deliberately different and the platform keeps them
+different. The kill-switch is a **decision** — the model is healthy and
+has been told not to be used. The injected fault is a **failure** — the
+model is broken and the platform noticed on its own. Both end up in the
+same place: the rule-based predictor, with every forecast flagged for a
+human. The difference is in the reason the forecast carries, and that
+reason is what an operator reads to decide whether to trust the number in
+front of them.
+
+The *decision layer's* own fallback is a third thing, and it does **not**
+engage here. That fallback is for when the intelligence layer produced no
+forecast at all; a rule-based forecast is still a forecast, so the decision
+engine keeps using its normal optimizer. The drill records this
+explicitly, because a report that claimed "the decision layer fell back"
+when it had not would be a claim the dashboard cannot corroborate.
+
+Getting the model into service first was not a formality. The platform
+judges the learned model against the rule-based baseline on every
+retrain, and **the verdict moves**: three retrains on the same stored
+history produced horizon errors of 84.9 L, 111.5 L and 58.7 L against
+baselines of 43.4 L, 106.8 L and 76.6 L — so the model won twice and
+lost once. Switching off a model the platform was not using anyway
+would have measured nothing, so the drill retrains until the forecasts
+actually come from the learned model, and records how many attempts that
+took.
+
+Recovery is not a switch either: with the fault cleared, the model comes
+back only by **earning** it, and the forecast's reason reverts to the
+model's own measured merit against the baseline.
+
+---
+
+The bug the drill found
+
+This is the part worth reading.
+
+With the simulator stopped, the platform's `sse_connections_total` stayed
+at **1** and `sse_reconnects_total` never moved — while the REST poller
+correctly went degraded. The platform believed it had a live event feed
+long after the feed was gone. The cause was **three separate bugs**, and
+all three had to be fixed for the platform to notice a dead simulator at
+all.
+
+**1. The reader blocked on the sync.** Every `simulation.tick` event
+triggered a full sync cycle, and the reader *awaited* it. The simulator
+runs eight ticks a second and a cycle reads nine endpoints, so the reader
+spent its life inside a sync cycle and read about **fifteen events per
+fifty seconds**. The simulator's event queue is two hundred deep, and the
+simulator **unsubscribes** a client whose queue overflows — so the
+platform was dropped from the bus entirely. The stream stayed open, kept
+sending keepalives, and delivered nothing: a live-looking feed that was
+permanently silent. The refreshes are now *scheduled* rather than
+awaited, so the reader never stops reading.
+
+**2. The read timeout was unbounded.** `httpx.Timeout(read=None)` means
+a socket whose far end has gone away produces neither data nor an error:
+the reader waits forever on a connection that will never answer. The
+simulator sends a keepalive every fifteen seconds, so a stream silent for
+longer than that is *dead*, not quiet. The read timeout is now a bounded
+`SSE_READ_TIMEOUT` (30 s).
+
+**3. A live stream can still be lying.** The dead simulator's queue keeps
+delivering buffered events for minutes, each one resetting every read
+timeout — so *"bytes are still arriving"* proves nothing. The stream's
+own tick is the evidence: if the platform's independent REST view says the
+world has moved on and the stream has not, the stream is describing a
+world that no longer exists. `_sse_stream_is_stale()` compares the two and
+drops the stream when it has fallen behind for longer than
+`SSE_STALE_GRACE` (45 s).
+
+Measured on the running stack, before and after:
+
+| | Before | After |
+|---|---|---|
+| SSE connections opened in 25 minutes | 17 | **1** |
+| SSE events received | 15 per connection | **742 in 3 minutes** |
+| Stale-stream drops on a *healthy* simulator | one every ~50 s | **0** |
+| Time to notice a stopped simulator | never | **~40 s** |
+
+The stale-stream detector also had to be given a clock it could trust: a
+stream that briefly falls behind and then catches up must not be punished
+later for a lag it has already recovered from, so the "behind" clock is
+reset the moment the stream catches up.
+
+`ML_KILL_SWITCH_FALLBACKS` was also found to be **defined but never
+incremented** — the counter that says how much of the platform's output
+the kill-switch pushed onto the rule-based predictor always read zero. It
+is now incremented where the fallback actually happens.
+
+---
+
+Tests
+
+| Suite | Count |
+|---|---|
+| Backend (`pytest`) | **373** (8 new: the stale-stream detector, the non-blocking reader, the failed-refresh isolation, and the injected prediction fault) |
+| Ruff | clean |
+
+---
+
+Definition of done — Part 2
+
+| Requirement | Status | Evidence |
+|---|---|---|
+| `scripts/crisis_drill.py`, run sequentially with a pause between scenarios | ✅ | One at a time, 12 s apart, with the memory guard in front of each |
+| Baseline, then the crises, then the combined crisis | ✅ | 8 scenarios, all RECOVERED |
+| The five faults, each 10–30 s | ✅ | 20 s each — latency, unavailable, error rate, stale data, stream disconnect |
+| Detection time recorded per scenario | ✅ | In the report, and an upper bound: the drill polls every 2 s |
+| The recommendation recorded per scenario | ✅ | Count, risk levels, and the most urgent proposal |
+| Recovery time recorded per scenario | ✅ | In the report |
+| Results saved with timestamps | ✅ | `docs/resilience-report.md`, generated `2026-11-24T18:12Z` |
+| The simulator's connection-pool exhaustion as a scenario | ✅ | 30 concurrent heavy reads; symptom, degradation and recovery recorded |
+| The restart/reset procedure documented | ✅ | README and the report's runbook section |
+| (a) The prediction component fails; the fallback takes over and recovers | ✅ | Kill-switch *and* an injected error — both drilled, both recovered |
+| (b) Postgres stopped under 30 s; cached state, degraded flag, no crash | ✅ | 16 s down, recovered in 2.0 s, never crashed |
+| Results added to `docs/resilience-report.md` | ✅ | 17 scenarios, all with measurements |
 
 ---
 
