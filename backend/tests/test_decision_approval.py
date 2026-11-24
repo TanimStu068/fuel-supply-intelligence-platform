@@ -386,3 +386,67 @@ async def test_a_failed_allocation_is_reconciled() -> None:
     assert recommendation.status is RecommendationStatus.FAILED
     assert recommendation.error_code == "FAILED"
     assert recommendation.error_message == "ROUTE_UNAVAILABLE"
+
+
+# --- the working set's bound ------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_the_working_set_does_not_grow_without_bound() -> None:
+    """The in-memory store is a working set, not the audit trail.
+
+    Left alone it grew for the life of the process: the background sync
+    proposes on every cycle, and each proposal carries a full projection,
+    its signals, its constraints and its alternatives. It reached three
+    thousand recommendations and twenty-two megabytes, and the endpoint
+    the dashboard polls every five seconds serialised all of it.
+    """
+    service = DecisionService(FakeClient(), history_limit=10)
+    optimizer = AllocationOptimizer()
+    risk = build_risk()
+
+    # Each tick is a different recommendation — the id is derived from
+    # the station, the fuel, the tick and the quantity.
+    for tick in range(10, 60):
+        await service.propose(optimizer.propose(world=build_world(tick=tick), risks=[risk]))
+
+    assert service.recommendation_count <= 10
+
+
+@pytest.mark.asyncio
+async def test_the_most_recent_open_recommendation_is_kept() -> None:
+    """The actionable ones survive the eviction.
+
+    A PROPOSED recommendation may be approved a second later, so the
+    eviction drops the oldest first: the recent proposals are the last
+    to go, and the operator's page shows the current ones.
+    """
+    service = DecisionService(FakeClient(), history_limit=1)
+    optimizer = AllocationOptimizer()
+    risk = build_risk()
+
+    first = await service.propose(optimizer.propose(world=build_world(tick=10), risks=[risk]))
+    await service.propose(optimizer.propose(world=build_world(tick=11), risks=[risk]))
+
+    assert service.get(first[0].id) is None
+    newest = service.list_recommendations()[0]
+    assert newest.id.endswith("-11-600") or "-11-" in newest.id
+
+
+@pytest.mark.asyncio
+async def test_the_list_can_be_capped() -> None:
+    """The endpoint caps the page, so a polled list cannot grow unbounded."""
+    service = await _service()
+    optimizer = AllocationOptimizer()
+
+    # The recommendation's id is derived from the station, the fuel, the
+    # tick and the quantity, so a different tick is a different
+    # recommendation — which is what the sync cycle produces in practice.
+    for tick in range(10, 30):
+        world = build_world(tick=tick)
+        risk = build_risk()
+        await service.propose(optimizer.propose(world=world, risks=[risk]))
+
+    assert len(service.list_recommendations(limit=5)) == 5
+    # The cap is on the page, not on the store: the count is still there.
+    assert service.recommendation_count > 5

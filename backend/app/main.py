@@ -81,6 +81,9 @@ async def lifespan(app: FastAPI):
         app.state.simulator,
         repository=app.state.database,
         database=app.state.database,
+        # Zero means unbounded — that is how the "before" side of the
+        # load test's second bottleneck is reproduced.
+        history_limit=settings.decision_history_limit,
     )
     app.state.intelligence = IntelligenceService(
         database=app.state.database,
@@ -759,6 +762,7 @@ async def set_kill_switch(
 async def get_recommendations(
     status: str | None = Query(default=None, description="Filter by status."),
     station_id: str | None = Query(default=None, description="Filter by station."),
+    limit: int | None = Query(default=None, ge=1, le=1000, description="How many to return."),
     service: DecisionService = Depends(get_decision),
 ) -> dict[str, Any]:
     """Return the allocation recommendations, newest first.
@@ -768,10 +772,17 @@ async def get_recommendations(
     stockout before and after, the signals that drove it, the constraints
     that were considered, a confidence, and the alternatives that were
     ranked and rejected.
+
+    The list is **capped**. The dashboard polls this endpoint every few
+    seconds, and a response that grows with the life of the process
+    eventually stops being served at all. The full history is in
+    ``/api/decision-history``, which reads it from Postgres.
     """
-    recommendations = service.list_recommendations(status=status, station_id=station_id)
+    page = limit if limit is not None else service.page_limit
+    recommendations = service.list_recommendations(status=status, station_id=station_id, limit=page)
     return {
         "count": len(recommendations),
+        "total": service.recommendation_count,
         "auto_mode": service.auto_mode,
         "fallback_reason": service.fallback_reason,
         "recommendations": [item.to_payload() for item in recommendations],

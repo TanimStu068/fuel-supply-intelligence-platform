@@ -90,6 +90,7 @@ class DecisionService:
         validator: AllocationValidator | None = None,
         repository: Any | None = None,
         database: Any | None = None,
+        history_limit: int = 500,
     ) -> None:
         self._client = client
         self._optimizer = optimizer or AllocationOptimizer()
@@ -97,6 +98,20 @@ class DecisionService:
         self._validator = validator or AllocationValidator()
         self._repository = repository
         self._database = database
+        #: How many recommendations the in-memory store keeps.
+        #:
+        #: The store is a **working set**, not the audit trail — the audit
+        #: trail is Postgres. Without a bound it grows for the life of the
+        #: process: the background sync proposes on every cycle, and each
+        #: proposal carries a full projection, its signals, its
+        #: constraints and its alternatives. Left alone it reached three
+        #: thousand recommendations and twenty-two megabytes, and every
+        #: call to ``/api/recommendations`` serialised all of it — an
+        #: endpoint the dashboard polls every five seconds.
+        #:
+        #: A limit of zero means **unbounded**, which is how the "before"
+        #: side of the load test's second bottleneck is reproduced.
+        self._history_limit = max(0, history_limit)
 
         #: The live recommendations, keyed by their id.
         self._recommendations: dict[str, Recommendation] = {}
@@ -199,17 +214,48 @@ class DecisionService:
         """The 409 codes the simulator returned, by code."""
         return dict(self._conflicts_by_code)
 
+    @property
+    def recommendation_count(self) -> int:
+        """How many recommendations the working set holds."""
+        return len(self._recommendations)
+
+    @property
+    def page_limit(self) -> int | None:
+        """How many recommendations one page holds, or ``None`` for no cap.
+
+        The page is smaller than the working set: the dashboard draws a
+        dozen cards at a time, and the rest are one click away. When the
+        working set is unbounded — the "before" side of the load test's
+        second bottleneck — there is no cap either, which is what makes
+        that state reproducible rather than remembered.
+        """
+        if not self._history_limit:
+            return None
+        return min(100, self._history_limit)
+
     def list_recommendations(
-        self, *, status: str | None = None, station_id: str | None = None
+        self,
+        *,
+        status: str | None = None,
+        station_id: str | None = None,
+        limit: int | None = None,
     ) -> list[Recommendation]:
-        """The recommendations, newest first."""
+        """The recommendations, newest first.
+
+        ``limit`` caps how many are returned. The endpoint uses it because
+        the dashboard polls this list every few seconds, and a page that
+        grows without bound is a page that eventually stops being served.
+        """
         rows = list(self._recommendations.values())
         if status:
             wanted = status.upper()
             rows = [row for row in rows if row.status.value == wanted]
         if station_id:
             rows = [row for row in rows if row.station_id == station_id]
-        return sorted(rows, key=lambda row: row.created_at, reverse=True)
+        rows.sort(key=lambda row: row.created_at, reverse=True)
+        if limit is not None:
+            rows = rows[: max(1, limit)]
+        return rows
 
     def get(self, recommendation_id: str) -> Recommendation | None:
         """One recommendation by id."""
@@ -245,10 +291,52 @@ class DecisionService:
                     self._counters.get("fallback_recommendations", 0) + 1
                 )
 
+        self._evict_old_recommendations()
+
         if self._auto_mode:
             await self._auto_approve(recommendations)
 
         return recommendations
+
+    def _evict_old_recommendations(self) -> None:
+        """Keep the in-memory store within its bound.
+
+        The store is a **working set**: the dashboard polls it, and the
+        decision engine reads it to reconcile allocations. It is not the
+        audit trail — Postgres keeps everything, and
+        ``/api/decision-history`` serves the full list.
+
+        What is dropped is chosen in two passes:
+
+        1. **Terminal** recommendations first — one that has ARRIVED,
+           FAILED or been REJECTED is finished, and nothing can act on it.
+        2. Then the **oldest** of what is left, if the store is still
+           over its limit.
+
+        The second pass is what makes the bound a bound. A proposal that
+        nobody acted on is still a proposal, and it is still in the store
+        — but a proposal made forty ticks ago is about a world that has
+        moved on, and the operator's page shows the current ones. Evicting
+        the oldest first keeps the actionable ones: the most recent
+        proposals are the last to go.
+        """
+        if not self._history_limit:
+            return
+        if len(self._recommendations) <= self._history_limit:
+            return
+
+        ordered = sorted(self._recommendations.values(), key=lambda row: row.created_at)
+
+        for recommendation in ordered:
+            if len(self._recommendations) <= self._history_limit:
+                return
+            if recommendation.status.is_terminal:
+                self._recommendations.pop(recommendation.id, None)
+
+        for recommendation in ordered:
+            if len(self._recommendations) <= self._history_limit:
+                return
+            self._recommendations.pop(recommendation.id, None)
 
     async def _auto_approve(self, recommendations: list[Recommendation]) -> None:
         """Approve the narrow class of action the auto-mode allows.
