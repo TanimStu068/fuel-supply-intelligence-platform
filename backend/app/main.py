@@ -689,6 +689,11 @@ async def get_model_status(
     return {
         "active_model": selector.active_model.value,
         "ml_kill_switch": selector.kill_switch,
+        #: The injected prediction fault, if one is active. It is reported
+        #: here because the operator's first question about a platform
+        #: that suddenly stopped using the model is "is the model broken,
+        #: or did somebody turn it off?" — and this is where the answer is.
+        "prediction_fault": selector.learned.injected_fault,
         "fallback_reasons": selector.fallback_counts,
         "learned_model": (
             {
@@ -754,6 +759,50 @@ async def set_kill_switch(
             "predictor and is flagged for human review"
             if enabled
             else "the learned model may be used again, subject to the normal confidence checks"
+        ),
+    }
+
+
+class PredictionFaultRequest(BaseModel):
+    """The body of a prediction-fault update."""
+
+    #: The fault to inject: ``"predict_error"``, or ``None`` to clear it.
+    fault: str | None = None
+
+
+@app.post("/api/model/fault", tags=["intelligence"])
+async def set_prediction_fault(
+    body: PredictionFaultRequest,
+    service: IntelligenceService = Depends(get_intelligence),
+) -> dict[str, Any]:
+    """Break the learned demand model on purpose, or repair it.
+
+    The prediction component is a **module inside the backend**, so there
+    is no container to stop and no service to take down. The only honest
+    way to show that the fallback takes over when the model *fails* —
+    rather than when an operator has politely switched it off — is to
+    break it on demand, on a running stack.
+
+    ``"predict_error"`` makes the model raise the way a broken model
+    raises. ``null`` clears the fault.
+
+    This is the counterpart to the kill-switch, and the two are not the
+    same. The kill-switch is a *decision*: the model is healthy and has
+    been told not to be used. This is a *fault*: the model is broken and
+    the platform has to notice on its own. Both must end up in the same
+    place — the rule-based predictor, with every forecast flagged for a
+    human — and the difference is in the reason the forecast carries.
+    """
+    fault = service.inject_prediction_fault(body.fault)
+    return {
+        "prediction_fault": fault,
+        "active_model": service.engine.selector.active_model.value,
+        "effect": (
+            "the learned model will raise on every forecast; every forecast "
+            "falls back to the rule-based predictor and is flagged for human review"
+            if fault
+            else "the injected fault is cleared; the learned model is used again, "
+            "subject to the normal confidence checks"
         ),
     }
 

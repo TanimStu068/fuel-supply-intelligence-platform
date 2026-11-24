@@ -628,6 +628,42 @@ class LearnedPredictor:
         #: Scores the model over a whole forecast horizon, the way it is
         #: actually used.
         self._horizon_validator = HorizonValidator()
+        #: The injected prediction fault, if one is active.
+        #:
+        #: The prediction component is a *module inside the backend*, so
+        #: there is no container to stop and no service to take down. The
+        #: way to demonstrate that the fallback really takes over is to
+        #: break the model the way it would break in production — it
+        #: throws — and to be able to do that on demand, on a running
+        #: stack, without editing code.
+        #:
+        #: This is deliberately the same shape as the simulator's own
+        #: ``/admin/faults``: a named fault, a duration, and a way to
+        #: clear it.
+        self._injected_fault: str | None = None
+
+    @property
+    def injected_fault(self) -> str | None:
+        """The injected prediction fault, if one is active."""
+        return self._injected_fault
+
+    def inject_fault(self, fault: str | None) -> str | None:
+        """Inject a fault into the learned model, or clear it.
+
+        ``"predict_error"`` makes the model raise the way a broken model
+        raises. ``None`` clears the fault.
+
+        This exists so the failure path can be *demonstrated* rather than
+        described: the drill breaks the model on a running stack, watches
+        the rule-based predictor take over, and then clears the fault and
+        watches the learned model come back.
+        """
+        self._injected_fault = fault
+        logger.warning(
+            "the learned model's injected fault was set",
+            extra={"fault": fault},
+        )
+        return self._injected_fault
 
     @property
     def is_trained(self) -> bool:
@@ -802,6 +838,15 @@ class LearnedPredictor:
         """
         if self._model is None:
             raise LearnedModelUnavailable("the learned model is not trained")
+
+        if self._injected_fault == "predict_error":
+            # The model fails the way a broken model fails: it throws, and
+            # the selector catches it and falls back. The message names
+            # the injected fault so the operator can tell a deliberately
+            # injected failure from a genuine one.
+            raise LearnedModelUnavailable(
+                "the learned model failed to predict: an injected prediction fault"
+            )
 
         multipliers = self._recent_multipliers(history, context, fuel)
         if multipliers is None:

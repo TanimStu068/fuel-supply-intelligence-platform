@@ -186,6 +186,35 @@ class IntelligenceService:
         self._last_result = None
         return state
 
+    @property
+    def injected_fault(self) -> str | None:
+        """The injected prediction fault, if one is active."""
+        return self._engine.selector.learned.injected_fault
+
+    def inject_prediction_fault(self, fault: str | None) -> str | None:
+        """Break the learned model on purpose, or repair it.
+
+        The prediction component is a module inside the backend, so there
+        is no container to stop: the only way to show that the fallback
+        really takes over when the model *fails* — rather than when an
+        operator has politely switched it off — is to break it on
+        purpose.
+
+        ``"predict_error"`` makes the model raise. ``None`` clears it.
+
+        The difference from the kill-switch matters. The kill-switch is a
+        *decision*: the model is fine and has been told not to be used.
+        This is a *fault*: the model is broken, and the platform has to
+        notice on its own. Both must end up in the same place — the
+        rule-based predictor, with every forecast flagged for a human.
+        """
+        state = self._engine.selector.learned.inject_fault(fault)
+        # The previous result was produced by a model that no longer
+        # exists, so it is dropped: the next evaluation has to see the
+        # failure for itself.
+        self._last_result = None
+        return state
+
     async def evaluate_and_store(self) -> IntelligenceResult | None:
         """Run the engine over the cached state and persist the results."""
         state = self._cache.state

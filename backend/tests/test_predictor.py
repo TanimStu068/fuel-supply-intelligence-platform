@@ -410,6 +410,58 @@ def test_the_selector_falls_back_when_the_model_raises() -> None:
     assert selector.fallback_counts.get("model_error") == 1
 
 
+def test_an_injected_prediction_fault_makes_the_model_raise() -> None:
+    """The injected fault breaks the model the way a broken model breaks.
+
+    This is what lets the fallback be *demonstrated* on a running stack
+    rather than only described: the prediction component is a module
+    inside the backend, so there is no container to stop.
+    """
+    selector = ForecastSelector(config=ForecastSelectorConfig(min_training_rows=1))
+    selector.learned._model = _fake_trained_model(training_rows=100)
+
+    selector.learned.inject_fault("predict_error")
+
+    with pytest.raises(LearnedModelUnavailable):
+        selector.learned.forecast(
+            context=_context(), fuel="DIESEL", horizon_ticks=4, history=_history()
+        )
+
+
+def test_an_injected_prediction_fault_falls_back_through_the_selector() -> None:
+    """With the fault injected, the selector serves the rule-based forecast."""
+    selector = ForecastSelector(config=ForecastSelectorConfig(min_training_rows=1))
+    selector.learned._model = _fake_trained_model(training_rows=100)
+
+    selector.learned.inject_fault("predict_error")
+
+    forecast = selector.forecast(
+        context=_context(), fuel="DIESEL", horizon_ticks=4, history=_history()
+    )
+
+    assert forecast.model is ModelKind.BASELINE
+    assert forecast.needs_human_review is True
+    assert forecast.fallback_reason is not None
+    assert "injected" in forecast.fallback_reason
+    # A *fault* is not a *decision*: it is counted as a model error, not
+    # as the kill-switch.
+    assert selector.fallback_counts.get("model_error") == 1
+    assert selector.fallback_counts.get("kill_switch") is None
+
+
+def test_clearing_the_injected_fault_repairs_the_model() -> None:
+    """Clearing the fault puts the learned model back in service."""
+    selector = ForecastSelector(config=ForecastSelectorConfig(min_training_rows=1))
+    selector.learned._model = _fake_trained_model(training_rows=100)
+
+    selector.learned.inject_fault("predict_error")
+    selector.learned.inject_fault(None)
+
+    assert selector.learned.injected_fault is None
+    # The model itself is still there; it was only being broken.
+    assert selector.learned.is_trained is True
+
+
 def test_the_kill_switch_is_counted_as_its_own_reason() -> None:
     """An operator turning the model off is not the same as a fault.
 
