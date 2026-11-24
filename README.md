@@ -403,6 +403,55 @@ status code). Observed behavior and all 10 discrepancies found so far are in
 endpoints (`POST /simulate`, `POST /advance-time`) do not exist; the integration
 guide is the real API.
 
+### Recovering a wedged simulator
+
+The simulator stores its world in SQLite behind a **connection pool of five
+connections plus ten in overflow**. When that pool is exhausted — usually by
+too many concurrent heavy reads — the simulator's own health endpoint cannot
+get a connection either, so it stops answering entirely. A simulator that has
+answered `500`s or timed out on `/v1/health` will not recover on its own.
+
+The fix is a restart, followed by a reset:
+
+```bash
+# 1. Restart the simulator. This clears the wedged pool.
+docker compose restart simulator
+
+# 2. Wait for it to answer again.
+until curl -fsS http://localhost:8100/v1/health > /dev/null; do sleep 1; done
+
+# 3. Reload the scenario from scratch.
+curl -s -X POST http://localhost:8100/admin/reset | jq
+
+# 4. Start ticking again (the reset leaves it paused).
+curl -s -X POST http://localhost:8100/admin/run | jq
+```
+
+The platform does **not** need to be restarted. Its circuit breaker opens on
+the failed calls, and it closes again by itself once the simulator answers:
+the breaker probes after `CIRCUIT_BREAKER_RECOVERY_SECONDS`, the sync
+succeeds, and the degraded flag clears. In the recorded drill the platform
+was serving cached state within about ten seconds of the simulator coming back.
+
+Two things worth knowing:
+
+* **A restart alone is not enough.** The simulator comes back with its pool
+  clean but its world mid-scenario. `POST /admin/reset` reloads the scenario
+  from tick zero, so the platform and the simulator agree about what "now"
+  means.
+* **The reset leaves the simulation paused.** `POST /admin/run` is what starts
+  it ticking again; without it the platform will look healthy but the world
+  will never advance.
+
+The platform's own behaviour during this window is deliberate: it keeps
+serving the **last known state**, flagged `degraded` with the state's age and
+a `degraded_reason`, and every dashboard endpoint keeps answering `200`. It
+never crashes and never serves the cached state as if it were fresh.
+
+The same procedure is exercised end-to-end by the connection-pool scenario in
+`scripts/crisis_drill.py`, and the recorded evidence is in
+[`docs/resilience-report.md`](docs/resilience-report.md).
+
 ---
 
 ## 10. Testing and CI
