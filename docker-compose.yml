@@ -21,15 +21,15 @@ name: fuel-supply-intelligence-platform
 #        monitoring  prometheus, grafana, node-exporter        (~0.4 GB)
 #
 #      ``COMPOSE_PROFILES=core`` lives in .env, so a plain ``docker compose
-#      up`` starts the platform and nothing else. The observability stack
-#      is added explicitly:
+#      up`` starts the platform and nothing else. The monitoring stack is
+#      added explicitly:
 #
 #        docker compose --profile core --profile monitoring up -d
 #
 #   4. Prometheus keeps its retention bounded (2 days, 500 MB) instead of
 #      growing until the disk is full.
 #
-# See docs/progress/day6.md ("Running the stack on a shared machine").
+# See docs/progress/day6.md ("The resource budget").
 
 x-logging: &default-logging
   driver: json-file

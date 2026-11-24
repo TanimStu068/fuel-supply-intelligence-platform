@@ -212,12 +212,12 @@ PY
 cmd_start_fuel() {
   cd "$ROOT"
   local with_obs="${1:-}"
-  log "starting the fuel stack${with_obs:+ (with observability)}"
-  if [[ "$with_obs" == "--with-observability" ]]; then
-    docker compose --profile observability up -d --wait
+  log "starting the fuel stack${with_obs:+ (with monitoring)}"
+  if [[ "$with_obs" == "--with-monitoring" ]]; then
+    docker compose --profile core --profile monitoring up -d --wait
   else
-    # Without the observability profile: the platform alone is four
-    # containers and about 300 MB, which is what runs comfortably on a
+    # Without the monitoring profile: the platform alone is four
+    # containers and about 280 MB, which is what runs comfortably on a
     # shared machine.
     docker compose up -d --wait
   fi
@@ -232,7 +232,7 @@ case "${1:-status}" in
   harden) cmd_harden ;;
   start-fuel) cmd_start_fuel "${2:-}" ;;
   *)
-    echo "usage: $0 {status|stop-restart-loops|stop-all|harden|start-fuel [--with-observability]}" >&2
+    echo "usage: $0 {status|stop-restart-loops|stop-all|harden|start-fuel [--with-monitoring]}" >&2
     exit 2
     ;;
 esac

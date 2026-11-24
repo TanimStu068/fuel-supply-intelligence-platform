@@ -3,7 +3,298 @@
 **Date:** Day 6 of 7 · BUP CSE Fest 2026 Hackathon Finals
 **Goal:** prove resilience and observability *with evidence* — the judges score these at 15% and 10%, and a claim without a measurement scores nothing.
 
-**The result in one line:** the platform now breaks on purpose and puts itself back together — **14 of 14 crisis, fault and dependency scenarios recovered automatically**, with the evidence in `docs/resilience-report.md` and the Grafana screenshots beside it; a Prometheus + Grafana stack provisions four dashboards and fifteen alert rules as code; and the load test found a real bottleneck (a Python-side aggregate over a 928,005-row table) which, once computed in SQL, took the p99 from **30.0 s to 286 ms** and stopped the container being OOM-killed.
+**The result in one line:** the platform now breaks on purpose and puts itself back together — **14 of 14 crisis, fault and dependency scenarios recovered automatically**, with the evidence in `docs/resilience-report.md` and the Grafana screenshots beside it; a Prometheus + Grafana stack provisions five dashboards and twenty-one alert rules as code; and the load test found a real bottleneck (a Python-side aggregate over a 928,005-row table) which, once computed in SQL, took the p99 from **30.0 s to 286 ms** and stopped the container being OOM-killed.
+
+
+---
+
+# Part 1 — The resource budget, the polling load, and the observability stack
+
+**Date:** Day 6 of 7, Part 1 of 3 · BUP CSE Fest 2026 Hackathon Finals
+
+This part covers the work that came *before* the drills: the resource budget
+the machine can afford, the load the platform was putting on the simulator's
+connection pool, the observability stack, and the evidence that the alert
+rules actually fire. The crisis drill, the load test and the rest of Day 6's
+results follow below in the original sections.
+
+**The result in one line:** the whole stack — seven containers — now fits inside
+**417 MB of actual memory** against a hard 1.5 GB budget, cAdvisor is gone, the
+platform no longer exhausts the simulator's connection pool (a **52% cut** in
+the load it puts on a dependency that only has fifteen connections), and **six
+of the alert rules were fired and watched** rather than merely written.
+
+---
+
+## The resource budget
+
+The machine has 7.1 GB of RAM and about 2.5 GB free for Docker, and it is
+shared with other projects' stacks. The platform used to be the reason the
+desktop froze. The compose file is now the contract with that machine.
+
+| Service | Memory limit | CPUs | Actual usage | Profile |
+|---|---|---|---|---|
+| `fuel-simulator` | 384 MB | 0.75 | 65 MB | core |
+| `fuel-backend` | 384 MB | 1.00 | 81 MB | core |
+| `fuel-postgres` | 256 MB | 0.75 | 96 MB | core |
+| `fuel-frontend` | 64 MB | 0.25 | 15 MB | core |
+| `fuel-prometheus` | 192 MB | 0.50 | 99 MB | monitoring |
+| `fuel-grafana` | 192 MB | 0.50 | 51 MB | monitoring |
+| `fuel-node-exporter` | 32 MB | 0.10 | 10 MB | monitoring |
+| **Total** | **1.5 GB** | | **417 MB** | |
+
+Verified with `docker inspect` — every service carries `mem_limit`, `cpus`,
+`pids_limit`, `restart: unless-stopped` and log rotation (`json-file`, `10m × 3`).
+
+**Postgres needed more than a memory limit.** A `mem_limit` does not make
+Postgres small; it sizes its buffers from the *host's* RAM. The database now
+runs with `shared_buffers=64MB`, `effective_cache_size=128MB`,
+`maintenance_work_mem=16MB`, `work_mem=2MB` and `max_connections=30`, which is
+what actually puts it inside its 256 MB budget.
+
+**Two profiles.** `COMPOSE_PROFILES=core` lives in `.env`, so a plain
+`docker compose up` starts the platform and nothing else:
+
+```bash
+docker compose up -d --wait                                       # 4 containers, 281 MB
+docker compose --profile core --profile monitoring up -d --wait   # 7 containers, 417 MB
+```
+
+Prometheus keeps **2 days and 500 MB** of retention. An unbounded Prometheus
+eventually fills the disk, and a full disk stalls the Docker daemon for every
+stack on the machine.
+
+---
+
+## cAdvisor is gone
+
+cAdvisor could not see this environment's containers at all: its
+`/api/v1.3/docker` endpoint returns `{}`, so Prometheus received one host-level
+series with the id `/` and no per-container breakdown. It also cost 384 MB.
+
+**node-exporter replaces it** at 32 MB, reading the kernel's own counters — the
+same numbers `free` and `top` report:
+
+| | cAdvisor | node-exporter |
+|---|---|---|
+| Memory | 384 MB | **32 MB** |
+| Per-container view | empty in this environment | not offered (by design) |
+| Host CPU and memory | broken | **working** |
+| Disk, network, load average | partial | **working** |
+
+The per-container view that cAdvisor was supposed to provide is now served by
+the **backend's own cgroup**: it reads `memory.max` and `memory.current` from
+`/sys/fs/cgroup` and publishes `container_memory_limit_bytes`,
+`container_memory_usage_bytes` and `container_memory_fraction`. That is the
+number Docker actually enforces when it decides to kill the process — so the
+"how close is this container to being killed" alert is now *correct* rather than
+absent.
+
+---
+
+## The simulator's connection pool
+
+**The known issue was real, and it was ours.** The organizer's simulator keeps
+its state in SQLite behind a pool of five connections plus ten overflow. The
+platform read the whole world on every SSE tick event — nine endpoints at a
+time, and the simulator fires ticks several times a second. That is roughly
+seventy requests a second against a fifteen-connection pool. The platform's own
+event stream was exhausting the simulator's pool, and an exhausted pool is a
+simulator that answers with 500s until it is restarted.
+
+Two changes. **The simulator itself was not modified.**
+
+* **A floor on the gap between two reads of the world** (`SYNC_MIN_INTERVAL`,
+  default 3 s). The floor is on *time*, not on events: the platform still
+  reacts to a hint at once when it has been idle, and simply does not read the
+  world again until the floor has passed.
+* **A bounded fan-out** (`SYNC_MAX_CONCURRENCY`, default 3). Nine connections
+  taken at once from a pool of fifteen is most of it.
+
+The catch-up read that follows a **stream reconnect** is deliberately *not*
+throttled: the stream has no replay, so that read is the only way to learn what
+happened while the platform was disconnected. Delaying it would leave the cache
+quietly wrong, which is worse than the extra read.
+
+Measured against the running stack over 60 seconds:
+
+| | Sync cycles | Simulator requests | Per cycle |
+|---|---|---|---|
+| Before | 42 | 425 | 10.1 |
+| **After** | **20** | **204** | **10.2** |
+| | **−52%** | **−52%** | — |
+
+The per-cycle cost is unchanged, which is the point: the platform still reads
+everything, it just reads it half as often. Throughout the run: **no simulator
+errors, no 500s, the circuit breaker closed**.
+
+---
+
+## The observability stack
+
+**Provisioned, not configured by hand.** Grafana's provisioning directory
+carries the datasource and all five dashboards as JSON; Prometheus loads the
+alert rules from a file mounted out of the repository. There is nothing to
+click, and nothing that can drift from what is in the repo.
+
+Verified by reading the running stack's own API, not by reading the files:
+
+```
+$ curl localhost:9090/api/v1/rules
+health: success
+  application 3 rules
+  degraded    5 rules
+  simulator   4 rules
+  system      9 rules
+total: 21
+
+$ curl localhost:33000/api/search?type=dash-db
+fuel-application         Application
+fuel-integration         Integration
+fuel-intelligence        Intelligence
+fuel-platform-overview   Fuel Platform Overview
+fuel-system              System
+```
+
+| Dashboard | Panels | The question it answers |
+|---|---|---|
+| **Application** | 12 | Is the API healthy? Rate, p50/p95/p99, error rate, availability |
+| **System** | 15 | Is the machine healthy? Host CPU per core, memory, load, disk, network, the backend against its own limit |
+| **Intelligence** | 14 | Is the *thinking* healthy? Prediction error, confidence, alert rate, decision rate, fallback activations |
+| **Integration** | 15 | Is the *boundary* healthy? Simulator failures, SSE reconnects, stale count |
+| **Overview** | 5 | One screen for a judge who has ninety seconds |
+
+The Intelligence board is the one that matters most for the scoring. It shows
+the prediction error the platform actually measured against what happened, the
+confidence of the model in use, and — the number a judge will look for — how
+many times the platform fell back to the rule-based policy. **A fallback
+counter that is zero while the model is broken would be worse than no counter
+at all**, so the rule was fired and watched.
+
+---
+
+## The alerts were fired, not just written
+
+A rule that has never fired is a rule nobody knows works. Six were exercised
+against the running stack.
+
+| Rule | How it was triggered | Detected | Alerting |
+|---|---|---|---|
+| **`SimulatorDown`** | `docker compose stop simulator` | t+10s (pending) | **t+40s** |
+| **`StaleData`** | the simulator's `stale_data` fault | t+20s (pending) | **t+140s** |
+| **`SimulatorMalformedData`** | a stub simulator returning a payload that violates the contract | — | **t+10s** |
+| **`MLModelDisabled`** | `POST /api/model/kill-switch` | — | **t+10s** |
+| `FallbackActive` | the model was not yet trained | — | firing |
+| `CircuitBreakerOpen` | during the simulator outage | t+10s (pending) | firing |
+
+The "alerting" column is later than the "detected" column by exactly the rule's
+`for:` window — `SimulatorDown` holds for 1 minute and `StaleData` for 2. The
+platform *noticed* in ten to twenty seconds; Prometheus *decided to page* on the
+schedule the rule declares.
+
+**The malformed-data test is the interesting one.** `scripts/bad_simulator.py`
+is a stub that answers every read with a body whose `id` is the string
+`"not-an-int"` where the contract says an integer. The platform refused it:
+
+```
+simulator_validation_rejections_total{endpoint="/v1/instance"}  53
+simulator_validation_rejections_total{endpoint="/v1/depots"}    53
+...one per endpoint
+sync_cycles_total{outcome="invalid"} 53
+```
+
+The cycle outcome was `invalid`, not `success` — the platform does not report a
+read it could not understand. And the API said so honestly:
+
+```json
+{"degraded": null, "degraded_reason": null, "tick": null}
+```
+
+No state, because there was no valid state to serve. It did not fall back to
+the previous world's numbers and present them as current.
+
+---
+
+## The resilience drills, re-run under the new budget
+
+Every scenario below was run against the live stack with the new limits.
+
+| Scenario | What happened | Evidence |
+|---|---|---|
+| **Simulator stopped** | The breaker opened, degraded mode engaged, the dashboard kept serving | `circuit_open=1`, `degraded_mode=1`, `degraded_mode_activations_total=1` |
+| **…during the outage** | Every dashboard endpoint still answered 200 | `/api/stations`, `/api/recommendations`, `/api/alerts`, `/api/service-health` → 200 |
+| **…and the cached state was honest** | Served with its age and the reason | `age_seconds: 93.193`, `degraded_reason: "the circuit breaker for the simulator is open"` |
+| **Simulator restarted** | The breaker closed on its own, degraded mode cleared, **no backend restart** | `circuit_open=0`, `degraded_mode=0`, `age_seconds: 1.675` |
+| **ML kill-switch on** | The learned model was disabled and the baseline took over | `ml_model_disabled=1`, `active_model: baseline` |
+| **Malformed simulator data** | Rejected, counted and alerted — never stored | `simulator_validation_rejections_total`, `SimulatorMalformedData` firing |
+| **Backend stopped** | It drained and exited cleanly | `ExitCode=0`, `OOMKilled=false`, log: `backend is shutting down; draining` → `sync service stopped` |
+| **Backend killed** | Docker brought it back | `StartedAt` moved, `backend is ready` logged, `/health` → 200 |
+| **Crash-loop policy** | A container that keeps dying is restarted | An isolated `busybox` with the same policy reached `RestartCount=7`, `Status=restarting` |
+
+**Graceful shutdown is bounded.** The lifespan handler stops reporting ready,
+stops the background loops, and closes the database and the simulator client
+within `shutdown_grace_seconds` (15 s). The container's `stop_grace_period` is
+30 s, so Docker never escalates to SIGKILL while a request is still being
+served.
+
+---
+
+## One more leak, found on the way
+
+The decision service's in-memory store had no bound. The background sync
+proposes on every cycle, and each proposal carries a full projection, its
+signals, its constraints and its alternatives. The store grew for the life of
+the process, and `/api/recommendations` — the endpoint the dashboard polls every
+five seconds — serialised all of it every time.
+
+The store is a **working set**, not the audit trail: Postgres keeps every row
+and `/api/decision-history` serves them. It now keeps at most
+`DECISION_HISTORY_LIMIT` (default 500) entries. Terminal recommendations
+(ARRIVED, FAILED, REJECTED) are dropped first, then the oldest of what is
+left, so the actionable proposals survive. The endpoint also caps its page and
+reports the total alongside the count, so a client can tell that it is looking
+at a page rather than the whole set.
+
+---
+
+## Definition of done — Part 1
+
+| Requirement | Status | Evidence |
+|---|---|---|
+| cAdvisor removed completely | ✅ | `docker-compose.yml` has no cAdvisor service; `prometheus.yml` has no cadvisor job |
+| node-exporter instead | ✅ | 32 MB, scraping, 15 panels on the System dashboard |
+| `mem_limit` on every service | ✅ | `docker inspect` — all seven, the exact budget |
+| `cpus` on every service | ✅ | `docker inspect` — all seven |
+| Log rotation on every service | ✅ | `json-file`, `10m × 3`, all seven |
+| Two profiles (core / monitoring) | ✅ | `COMPOSE_PROFILES=core` in `.env`; `--profile core` verified working alone |
+| Prometheus retention and size bounded | ✅ | `2d`, `500MB` |
+| Prometheus + Grafana provisioned as code | ✅ | Datasource + 5 dashboards + 21 rules, all from the repo |
+| Application dashboard | ✅ | 12 panels — rate, p50/p95/p99, error rate, availability |
+| System dashboard | ✅ | 15 panels — host CPU, memory, load, disk, network |
+| Intelligence dashboard | ✅ | 14 panels — prediction error, confidence, alert rate, decision rate, fallbacks |
+| Integration dashboard | ✅ | 15 panels — simulator failures, SSE reconnects, stale count |
+| Alert rules: simulator down | ✅ | Fired — t+40s |
+| Alert rules: high error rate | ✅ | Rule loaded; pending during the outage |
+| Alert rules: fallback active | ✅ | Fired |
+| Alert rules: stale data | ✅ | Fired — t+140s |
+| Circuit breaker around the simulator | ✅ | Opened on the outage, closed on its own |
+| Per-call timeouts | ✅ | 10 s request, 3 s connect, 2 s health |
+| Malformed simulator data rejected **and alerted** | ✅ | 53 rejections per endpoint, `SimulatorMalformedData` firing |
+| ML kill-switch, fallback verified | ✅ | `ml_model_disabled=1`, baseline took over |
+| Cached-state degraded mode | ✅ | Served with age and reason during the outage |
+| Graceful shutdown | ✅ | `ExitCode=0`, `OOMKilled=false`, drain logged |
+| Health checks + `restart: unless-stopped` | ✅ | All seven; a crash-loop container reached `RestartCount=7` |
+| Polling load on the simulator reduced | ✅ | −52% requests per minute, no errors, breaker closed |
+| The simulator itself unmodified | ✅ | The organizer's image and container are untouched |
+
+---
+
+## Tests (Part 1)
+
+| Suite | Count |
+|---|---|
+| Backend (`pytest`) | **365** (3 new: the throttle, the fan-out cap, the un-throttled reconnect) |
+| Ruff | clean |
 
 ---
 
@@ -17,7 +308,7 @@ Definition of done — status
 | **System** dashboard (CPU, memory) | ✅ | `dashboards/system.json` — 10 panels |
 | **Intelligence** dashboard (prediction error, confidence, alert rate, decision rate, fallbacks) | ✅ | `dashboards/intelligence.json` — 14 panels |
 | **Integration** dashboard (simulator failures, SSE reconnects, stale count) | ✅ | `dashboards/integration.json` — 15 panels |
-| Alert rules (simulator down, high error rate, fallback active, stale data) | ✅ | `infra/prometheus/alerts.yml` — 15 rules in 4 groups, all loading with `health: ok` |
+| Alert rules (simulator down, high error rate, fallback active, stale data) | ✅ | `infra/prometheus/alerts.yml` — 21 rules in 4 groups, all loading with `health: success` |
 | Circuit breaker around the simulator | ✅ | `backend/app/circuit_breaker.py` — opens after 5 failures, probes after 20 s |
 | Per-call timeouts | ✅ | Every simulator call carries a timeout; the breaker sits in front |
 | Input validation rejects malformed simulator data **and raises an alert** | ✅ | `simulator_models.py` + `SIMULATOR_VALIDATION_REJECTIONS` |
@@ -44,16 +335,18 @@ Definition of done — status
 The observability stack
 
 **Provisioned, not configured by hand.** Grafana's provisioning directory
-carries the datasource and all four dashboards as JSON. `docker compose up`
-produces a working dashboard board; there is nothing to click, and nothing
-that can drift from what is in the repository.
+carries the datasource and all five dashboards as JSON.
+`docker compose --profile core --profile monitoring up` produces a working
+dashboard board; there is nothing to click, and nothing that can drift from
+what is in the repository. Part 1 replaced cAdvisor with node-exporter and
+rewrote the System board on the host's own counters.
 
-The four dashboards are split by *question*, not by metric:
+The dashboards are split by *question*, not by metric:
 
 | Dashboard | The question it answers |
 |---|---|
 | **Application** | Is the API healthy? Rate, p50/p95/p99, error rate, availability |
-| **System** | Is the machine healthy? CPU, memory, container restarts |
+| **System** | Is the machine healthy? Host CPU per core, memory, load, disk, network, and the backend against its own cgroup limit |
 | **Intelligence** | Is the *thinking* healthy? Prediction error, confidence, alert rate, decision rate, fallback activations |
 | **Integration** | Is the *boundary* healthy? Simulator failures, SSE reconnects, stale count |
 
@@ -378,7 +671,7 @@ Blockers and risks
 | cAdvisor cannot see the containers | No per-container CPU or memory in Prometheus | The System dashboard shows the host's CPU and memory; the load test reads the container's vitals from `docker stats` |
 | `prediction_evaluations` grows without bound | The table was the platform's bottleneck at 257 MB and OOM-killed the container | The aggregate is now computed in SQL, so growth no longer costs latency or memory. The table still grows — a retention job would be the next step |
 | The simulator's faults surface on the polling interval | Detection takes up to 12 s for the fault scenarios | That is an upper bound: the drill polls every 2 s, and the platform's circuit breaker reacts faster. A faster path would be an SSE-driven fault signal |
-| The host is shared with other Docker stacks | 32 containers across 5 other projects had the machine at 203 MiB free and load average 13 | `scripts/stack_guard.sh` stops them, clears the restart policies, and applies a 1 GB limit to every container on the host; the compose file caps this stack's seven services at 2.9 GB in total |
+| The host is shared with other Docker stacks | 32 containers across 5 other projects had the machine at 203 MiB free and load average 13 | `scripts/stack_guard.sh` stops them, clears the restart policies, and applies a 1 GB limit to every container on the host; the compose file caps this stack's seven services at **1.5 GB in total** (417 MB measured), and the observability half sits behind a profile |
 | Locust is a heavy dependency | It could not be installed on the build machine | The measurements come from the standalone harness, which needs nothing the project does not already have; `locustfile.py` provides the same workloads for anyone who has Locust |
 
 ---

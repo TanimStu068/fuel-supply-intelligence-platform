@@ -275,9 +275,13 @@ service here has a **memory limit**, a **CPU limit** and **log rotation**,
 and the three observability services sit behind a profile:
 
 ```bash
-docker compose up -d --wait                             # the platform: 4 containers
-docker compose --profile observability up -d --wait    # + Prometheus, Grafana, cAdvisor
+docker compose up -d --wait                                       # the platform: 4 containers, ~280 MB
+docker compose --profile core --profile monitoring up -d --wait   # + Prometheus, Grafana, node-exporter
 ```
+
+The whole stack is capped at **1.5 GB** of memory in total, and measures
+**~417 MB** in use. `COMPOSE_PROFILES=core` lives in `.env`, so a plain
+`docker compose up` starts the platform alone.
 
 If the machine is already struggling, `scripts/stack_guard.sh` is the
 one-stop shop:
@@ -286,7 +290,7 @@ one-stop shop:
 scripts/stack_guard.sh status        # what is running, and how much memory it uses
 scripts/stack_guard.sh stop-all      # stop every container on the host
 scripts/stack_guard.sh harden         # a 1 GB limit and no restart loop on all of them
-scripts/stack_guard.sh start-fuel     # this stack, light, with the observability profile
+scripts/stack_guard.sh start-fuel     # this stack, light, with the monitoring profile
 ```
 
 `harden` also writes `docs/host-tuning/daemon.json`, the daemon
@@ -559,9 +563,13 @@ dashboard is served by `docker compose up` on `:5173`. — **Proven live**; see
 
 ### Day 6 — Resilience, observability, crisis drills, load testing *(done)*
 
-* Prometheus and Grafana provisioned as code: Application, System, Intelligence
-  and Integration dashboards, plus 15 alert rules in 4 groups — all verified by
-  firing them, not by reading them
+* Prometheus and Grafana provisioned as code: Application, System, Intelligence,
+  Integration and Overview dashboards, plus 21 alert rules in 4 groups — six of
+  them verified by **firing** them, not by reading them
+* The stack now fits a shared machine: **417 MB in use** against a hard 1.5 GB
+  budget, every service with a memory limit, a CPU limit and log rotation,
+  cAdvisor replaced by node-exporter, and the observability half behind a
+  profile — see [`docs/progress/day6.md`](docs/progress/day6.md)
 * Circuit breaker, timeouts, malformed-data rejection with alert, ML kill
   switch, cached degraded mode, graceful shutdown, compose health checks
 * `scripts/crisis_drill.py`: baseline, demand spike, shipment delay, depot
@@ -615,7 +623,7 @@ Never cut: the load test, the resilience report, or the fresh-clone test.
 | 5 | Operator interface | `frontend/` | **Done** (Day 5) — nine screens over the live API |
 | 6 | Architecture diagram | [`docs/assets/architecture.png`](docs/assets/architecture.png), §3 | **Done** — final Day 7 |
 | 7 | Deployment | `docker-compose.yml`, `.github/workflows/ci.yml` | Compose done, CI/CD final Day 7 |
-| 8 | Observability evidence | Grafana dashboards, `/metrics`, JSON logs | **Done** (Day 6) — 4 provisioned dashboards, 15 alert rules, 4 screenshots |
+| 8 | Observability evidence | Grafana dashboards, `/metrics`, JSON logs | **Done** (Day 6) — 5 provisioned dashboards, 21 alert rules (6 fired and watched), 4 screenshots |
 | 9 | Resilience demonstration | [`docs/fault-tests.md`](docs/fault-tests.md), [`docs/resilience-report.md`](docs/resilience-report.md) | **Done** (Day 6) — 14 of 14 scenarios recovered automatically |
 | 10 | Load-test evidence | [`docs/load-test-report.md`](docs/load-test-report.md) | **Done** (Day 6) — 3 workloads, p99 30 030 ms → 286 ms |
 | 11 | Final demo | `docs/demo-script.md` | Day 7 |
