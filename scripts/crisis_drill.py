@@ -1032,9 +1032,7 @@ class Drill:
                 )
             )
 
-        result.observations.append(
-            Observation("status after recovery", self.service_health().get("status", "unknown"))
-        )
+        result.observations.append(Observation("status after recovery", self._platform_status()))
         result.observations.append(Observation("memory after the scenario", memory_report()))
 
         if not recovered:
@@ -1207,6 +1205,7 @@ class Drill:
         database.observations.append(
             Observation("baseline status", self.health().get("status", "unknown"))
         )
+        database.observations.append(Observation("memory before the scenario", memory_report()))
         database.observations.append(
             Observation("cached state before the outage", self._cached_state_summary())
         )
@@ -1240,6 +1239,11 @@ class Drill:
                 "yes" if self._backend_is_alive() else "no — the platform crashed",
             )
         )
+
+        # What the platform recommended while the database was gone: the
+        # decision engine keeps working from the cached world, so the
+        # drill has to show that it kept recommending.
+        database.recommendation = self._summarise_recommendations(database.started_at)
 
         detected, elapsed = self.wait_for(
             lambda: self.health().get("components", {}).get("database", {}).get("status") != "ok",
@@ -1288,14 +1292,22 @@ class Drill:
                 "its way back."
             ),
             expects=(
-                "every forecast comes from the rule-based predictor, is flagged "
-                "for a human, and the decision layer uses the fallback policy"
+                "every forecast comes from the rule-based predictor and is flagged for a human"
             ),
             started_at=datetime.now(UTC),
         )
         prediction.observations.append(
             Observation("baseline status", self.health().get("status", "unknown"))
         )
+        prediction.observations.append(Observation("memory before the scenario", memory_report()))
+        # The kill-switch is only meaningful on a model that is *in service*.
+        # Switching off a model the platform was not using anyway proves
+        # nothing, so the drill trains it first and records whether the
+        # learned model was actually the active one before the switch.
+        trained = self._train_model()
+        prediction.observations.append(Observation("the learned model was trained", trained))
+        in_service = self._wait_for_model_in_service()
+        prediction.observations.append(Observation("the learned model was in service", in_service))
         prediction.observations.append(
             Observation("active model before", self._model_status().get("active_model", "unknown"))
         )
@@ -1335,8 +1347,8 @@ class Drill:
         )
         prediction.observations.append(
             Observation(
-                "decision engine's fallback reason",
-                str(self.get("/api/recommendations").get("fallback_reason") or "—"),
+                "the decision engine's own fallback",
+                self._decision_fallback_state(),
             )
         )
         prediction.served_during_incident = self._check_serving()
@@ -1388,12 +1400,15 @@ class Drill:
         broken.observations.append(
             Observation("baseline status", self.health().get("status", "unknown"))
         )
+        broken.observations.append(Observation("memory before the scenario", memory_report()))
         # The learned model has to be *in service* before it can be
         # broken: a model that was never trained falls back anyway, so
         # injecting a fault into it would measure nothing. The drill
         # trains it first, and only then breaks it.
         trained = self._train_model()
         broken.observations.append(Observation("the learned model was trained", trained))
+        in_service = self._wait_for_model_in_service()
+        broken.observations.append(Observation("the learned model was in service", in_service))
         broken.observations.append(
             Observation(
                 "active model before",
@@ -1412,8 +1427,8 @@ class Drill:
         )
         broken.observations.append(
             Observation(
-                "the decision engine's fallback reason",
-                str(self.get("/api/recommendations").get("fallback_reason") or "—"),
+                "the decision engine's own fallback",
+                self._decision_fallback_state(),
             )
         )
         broken.served_during_incident = self._check_serving()
@@ -1461,6 +1476,30 @@ class Drill:
             return response.status_code in {200, 503}
         except Exception:
             return False
+
+    def _decision_fallback_state(self) -> str:
+        """Whether the *decision engine* fell back, and why.
+
+        This is a different fallback from the prediction layer's, and the
+        report must not confuse the two. The prediction layer falls back to
+        the rule-based **predictor** when the model is off or broken — that
+        is the fallback the kill-switch and the injected fault exercise.
+        The decision engine has its own fallback policy, which engages only
+        when the intelligence layer produced **no forecast at all**; a
+        rule-based forecast is still a forecast, so the decision engine
+        keeps using the normal optimizer.
+
+        Saying "the decision engine fell back" when it did not would be a
+        claim the dashboard cannot corroborate, so the report states which
+        of the two actually happened.
+        """
+        reason = self.get("/api/recommendations").get("fallback_reason")
+        if reason:
+            return f"engaged: {reason}"
+        return (
+            "not engaged — the rule-based predictor still produced a forecast, "
+            "so the decision engine kept using the normal optimizer"
+        )
 
     def _forecast_summary(self) -> str:
         """Which predictor produced the forecasts, and whether a human is needed.
@@ -1541,6 +1580,25 @@ class Drill:
             )
         except Exception as exc:
             return f"the training request failed: {exc}"
+
+    def _wait_for_model_in_service(self, timeout: float = 90.0) -> str:
+        """Wait until the platform's forecasts come from the learned model.
+
+        Training a model does not put it into service on its own: the
+        platform re-evaluates on its own cycle, and until it does, the
+        forecasts on screen are still the old ones. A drill that read them
+        immediately would measure the *previous* evaluation, not the one
+        the kill-switch or the fault is about to change.
+        """
+        deadline = time.monotonic() + timeout
+        last = "never re-evaluated"
+        while time.monotonic() < deadline:
+            status = self._model_status()
+            last = str(status.get("active_model", "unknown"))
+            if last == "learned":
+                return last
+            time.sleep(3)
+        return f"still '{last}' after {timeout:.0f}s"
 
     def _prediction_fault(self) -> str | None:
         """The injected prediction fault, if one is active."""
@@ -2002,6 +2060,22 @@ class Drill:
         """
         return str(self.service_health().get("circuit_breaker", {}).get("status", "unknown"))
 
+    def _platform_status(self) -> str:
+        """The platform's overall status, derived from its components.
+
+        ``/api/service-health`` reports each dependency separately and does
+        not carry a top-level ``status`` of its own, so the overall verdict
+        is computed here: the platform is ``ok`` only when every component
+        is. Reporting "unknown" instead would leave the reader guessing.
+        """
+        components = self.service_health().get("components", {})
+        if not components:
+            return "unknown"
+        statuses = {str(value.get("status", "unknown")) for value in components.values()}
+        if statuses == {"ok"}:
+            return "ok"
+        return "degraded (" + ", ".join(sorted(statuses)) + ")"
+
     def _degraded_mode(self) -> bool:
         """Whether the platform is serving last-known state.
 
@@ -2138,6 +2212,7 @@ def render_report(
         lines.append("")
         lines.append(f"*{result.what}*")
         lines.append("")
+        lines.append(f"- **Started at:** {result.started_at.isoformat()}")
         lines.append(f"- **Expected:** {result.expects}")
         lines.append(
             f"- **Detected in:** {result.detection_seconds}s — {result.detected_by}"
