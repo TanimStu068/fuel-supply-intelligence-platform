@@ -110,6 +110,12 @@ class SyncService:
         #: The worker task that does the reading, so a burst of requests
         #: collapses into one cycle rather than one cycle each.
         self._sync_worker: asyncio.Task[None] | None = None
+        #: When the last cycle started. The throttle measures the gap
+        #: against this, so a burst of hints arriving back to back does
+        #: not turn into a burst of full reads of the world.
+        self._last_cycle_started: float = 0.0
+        #: The cap on how many simulator calls may be in flight at once.
+        self._semaphore = asyncio.Semaphore(self._settings.sync_max_concurrency)
 
     # -- lifecycle ---------------------------------------------------------
 
@@ -163,14 +169,57 @@ class SyncService:
         base = self._settings.sync_poll_interval
         return max(0.5, base + random.uniform(0, base * 0.1))
 
-    async def run_sync_cycle(self) -> bool:
+    async def _throttle(self) -> None:
+        """Wait out the minimum gap between two sync cycles.
+
+        **Why this exists.** The simulator publishes a ``simulation.tick``
+        event several times a second. Every one of them triggers a read of
+        the world, and a read is nine endpoints. Sustained polling like
+        that exhausts the simulator's connection pool — and an exhausted
+        pool is a simulator that answers with 500s until it is restarted.
+
+        The throttle is a floor on *time*, not a filter on events: the
+        platform still reacts to a hint at once when it has been idle, and
+        simply does not read the world again until the floor has passed.
+        The floor is what keeps the simulator's pool alive.
+        """
+        floor = self._settings.sync_min_interval
+        if floor <= 0:
+            return
+
+        elapsed = time.monotonic() - self._last_cycle_started
+        remaining = floor - elapsed
+        if remaining <= 0:
+            return
+
+        logger.debug(
+            "sync cycle throttled",
+            extra={"floor_seconds": floor, "waited_seconds": round(remaining, 3)},
+        )
+        await asyncio.sleep(remaining)
+
+    async def run_sync_cycle(self, *, throttled: bool = True) -> bool:
         """Fetch the whole world, store it, and mirror it into Postgres.
 
         Returns True when the cycle succeeded. A failed cycle never raises:
         the service must keep running while the simulator is down.
+
+        ``throttled=False`` skips the minimum-gap wait. It is used for the
+        read that follows a **stream reconnect**: the stream has no replay,
+        so that read is the only way to learn what happened while the
+        platform was disconnected. It is also rare, so it costs nothing to
+        make it immediate — whereas delaying it would leave the cache
+        quietly wrong.
         """
+        # The throttle comes first: the gap is measured against the start
+        # of the *previous* cycle, so the floor applies between two reads
+        # of the world rather than between the request and the read.
+        if throttled:
+            await self._throttle()
+
         correlation_id = bind_correlation_id(new_correlation_id("sync"))
         started = time.perf_counter()
+        self._last_cycle_started = time.monotonic()
         self._cache.mark_attempt()
 
         logger.info("sync cycle started", extra={"correlation_id": correlation_id})
@@ -282,10 +331,27 @@ class SyncService:
         )
         return True
 
-    async def _fetch_world(self) -> CachedState:
-        """Read every section of the world in parallel."""
-        import asyncio
+    async def _guarded(self, call: Any) -> Any:
+        """Run one simulator call inside the fan-out semaphore.
 
+        The simulator's connection pool holds fifteen connections and a
+        cycle reads nine endpoints. Taking all nine at once works right
+        up until the day something else needs a connection — and then the
+        pool is exhausted and the simulator answers with 500s. The
+        semaphore keeps the platform inside the pool it is reading from.
+        """
+        async with self._semaphore:
+            return await call
+
+    async def _fetch_world(self) -> CachedState:
+        """Read every section of the world, with a bounded fan-out.
+
+        The nine reads are made concurrently because they are independent
+        and each one is a round trip to the simulator. The concurrency is
+        capped at ``sync_max_concurrency``: nine connections taken at once
+        from a pool of fifteen is already most of it, and a second cycle
+        starting before the first has finished would take the rest.
+        """
         self._client.reset_stale()
         (
             instance,
@@ -298,15 +364,15 @@ class SyncService:
             allocations,
             metrics,
         ) = await asyncio.gather(
-            self._client.get_instance(),
-            self._client.get_regions(),
-            self._client.get_depots(),
-            self._client.get_stations(),
-            self._client.get_routes(),
-            self._client.get_supply_arrivals(),
-            self._client.get_events(),
-            self._client.get_allocations(),
-            self._client.get_metrics(),
+            self._guarded(self._client.get_instance()),
+            self._guarded(self._client.get_regions()),
+            self._guarded(self._client.get_depots()),
+            self._guarded(self._client.get_stations()),
+            self._guarded(self._client.get_routes()),
+            self._guarded(self._client.get_supply_arrivals()),
+            self._guarded(self._client.get_events()),
+            self._guarded(self._client.get_allocations()),
+            self._guarded(self._client.get_metrics()),
         )
 
         return CachedState(
@@ -489,7 +555,9 @@ class SyncService:
             attempt = 0
 
             # No Last-Event-ID replay: re-read everything after a reconnect.
-            await self.run_sync_cycle()
+            # This read is not throttled — it is the catch-up for the
+            # window the platform was not listening for.
+            await self.run_sync_cycle(throttled=False)
 
     def _reconnect_delay(self, attempt: int) -> float:
         """Exponential backoff with jitter between reconnect attempts."""

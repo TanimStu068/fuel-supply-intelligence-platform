@@ -729,3 +729,86 @@ async def test_the_sync_lock_serialises_cycles(service, client) -> None:
     await asyncio.gather(*(service._request_sync() for _ in range(6)))
 
     assert peak == 1
+
+
+# -- keeping the simulator's connection pool alive ---------------------------
+
+
+async def test_two_cycles_in_a_row_are_spaced_by_the_minimum_interval(
+    settings, client, database, cache
+) -> None:
+    """The platform does not read the world faster than the floor allows.
+
+    **Why this matters.** The simulator's database pool holds fifteen
+    connections. A cycle reads nine endpoints. Reading the world as fast
+    as the SSE stream fires ticks exhausted that pool, and the simulator
+    answered with 500s until it was restarted.
+
+    The floor is what stops the platform from being the reason its
+    dependency falls over.
+    """
+    settings = settings.model_copy(update={"sync_min_interval": 0.25})
+    service = SyncService(client=client, database=database, cache=cache, settings=settings)
+
+    loop = asyncio.get_running_loop()
+    started = loop.time()
+    await service.run_sync_cycle()
+    await service.run_sync_cycle()
+    elapsed = loop.time() - started
+
+    assert elapsed >= 0.25
+
+
+async def test_the_fan_out_never_exceeds_the_configured_concurrency(
+    settings, client, database, cache
+) -> None:
+    """A cycle takes at most ``sync_max_concurrency`` connections at once.
+
+    Nine connections at once is most of the pool; two overlapping cycles
+    would take all of it.
+    """
+    settings = settings.model_copy(update={"sync_max_concurrency": 3})
+    service = SyncService(client=client, database=database, cache=cache, settings=settings)
+
+    concurrent = 0
+    peak = 0
+    lock = asyncio.Lock()
+
+    original = service._guarded
+
+    async def _tracking(call):
+        nonlocal concurrent, peak
+        async with lock:
+            concurrent += 1
+            peak = max(peak, concurrent)
+        try:
+            return await original(call)
+        finally:
+            async with lock:
+                concurrent -= 1
+
+    service._guarded = _tracking
+
+    await service.run_sync_cycle()
+
+    assert peak <= 3
+
+
+async def test_a_reconnect_catch_up_is_not_throttled(settings, client, database, cache) -> None:
+    """The read that follows a stream reconnect happens at once.
+
+    The stream has no replay, so that read is the only way to learn what
+    happened while the platform was disconnected. Delaying it would leave
+    the cache quietly wrong — which is worse than the extra read.
+    """
+    settings = settings.model_copy(update={"sync_min_interval": 5.0})
+    service = SyncService(client=client, database=database, cache=cache, settings=settings)
+
+    await service.run_sync_cycle()
+
+    loop = asyncio.get_running_loop()
+    started = loop.time()
+    await service.run_sync_cycle(throttled=False)
+    elapsed = loop.time() - started
+
+    assert elapsed < 1.0

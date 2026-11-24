@@ -98,12 +98,47 @@ class Settings(BaseSettings):
     sync_enabled: bool = Field(default=True, alias="SYNC_ENABLED")
     #: Seconds between two REST poll cycles.
     sync_poll_interval: float = Field(default=5.0, alias="SYNC_POLL_INTERVAL", gt=0)
+    #: The shortest gap between two sync cycles, whatever asked for one.
+    #:
+    #: The simulator publishes a ``simulation.tick`` event several times a
+    #: second, and every one of them used to trigger a full read of the
+    #: world — nine endpoints against a simulator whose connection pool
+    #: holds fifteen connections. Sustained polling like that is what
+    #: exhausts the pool and takes the simulator down.
+    #:
+    #: This floor is the throttle: however many hints arrive, the platform
+    #: reads the world at most once every ``sync_min_interval`` seconds.
+    #: The poll above is the safety net; the SSE stream is the hint.
+    sync_min_interval: float = Field(default=3.0, alias="SYNC_MIN_INTERVAL", gt=0)
+    #: How many simulator calls may be in flight at once.
+    #:
+    #: A cycle reads nine endpoints in parallel. Unbounded, that is nine
+    #: connections taken from a pool of fifteen — and a second cycle can
+    #: start before the first has finished. The fan-out is bounded so the
+    #: platform stays inside the pool it is reading from.
+    sync_max_concurrency: int = Field(default=3, alias="SYNC_MAX_CONCURRENCY", ge=1, le=16)
     #: Base delay for the SSE reconnect backoff.
     sse_reconnect_base_delay: float = Field(default=1.0, alias="SSE_RECONNECT_BASE_DELAY", gt=0)
     #: Ceiling for the SSE reconnect backoff.
     sse_reconnect_max_delay: float = Field(default=30.0, alias="SSE_RECONNECT_MAX_DELAY", gt=0)
     #: How many demand observations to pull per ingest cycle.
     demand_history_limit: int = Field(default=500, alias="DEMAND_HISTORY_LIMIT", gt=0)
+    #: How many recommendations the decision engine's working set keeps.
+    #:
+    #: The working set is what ``/api/recommendations`` serves, and the
+    #: dashboard polls that endpoint every few seconds. Left unbounded it
+    #: grew to three thousand recommendations and twenty-two megabytes,
+    #: and every poll serialised all of it. The audit trail is unaffected:
+    #: Postgres keeps every row, and ``/api/decision-history`` serves them.
+    #:
+    #: A value of zero disables the bound, which is what makes the "before"
+    #: side of the load test's second bottleneck reproducible rather than
+    #: remembered.
+    decision_history_limit: int = Field(
+        default=500,
+        alias="DECISION_HISTORY_LIMIT",
+        ge=0,
+    )
 
     # --- Intelligence -------------------------------------------------------
     #: How many ticks ahead the demand forecast reaches. One simulated day
