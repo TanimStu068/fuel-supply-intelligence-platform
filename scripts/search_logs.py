@@ -13,12 +13,14 @@ incident:
 * "show me every error in the last ten minutes"
 * "show me the simulator calls that failed"
 * "show me what the platform was doing when the simulator went down"
+* "show me one event type between two timestamps"
 
 Usage::
 
     scripts/search_logs.py                       # the last 200 lines, summarised
     scripts/search_logs.py --level ERROR         # only the errors
     scripts/search_logs.py --correlation cid-abc # one unit of work
+    scripts/search_logs.py --event-type simulation.tick --since 2026-11-24T10:00:00Z
     scripts/search_logs.py --contains "circuit"  # full-text search
     scripts/search_logs.py --tail 5000 --json    # machine-readable output
 """
@@ -79,23 +81,33 @@ def filter_entries(
     *,
     level: str | None,
     correlation: str | None,
+    event_type: str | None,
     contains: str | None,
     since: datetime | None,
+    until: datetime | None,
 ) -> list[dict[str, Any]]:
     """Apply the filters."""
     result = entries
     if level:
         wanted = level.upper()
         result = [
-            entry
-            for entry in result
-            if str(entry.get("level", "")).upper() == wanted
+            entry for entry in result if str(entry.get("level", "")).upper() == wanted
         ]
     if correlation:
         result = [
             entry
             for entry in result
-            if entry.get("correlation_id") == correlation
+            if str(entry.get("correlation_id", "")).casefold() == correlation.casefold()
+        ]
+    if event_type:
+        wanted = event_type.casefold()
+        result = [
+            entry
+            for entry in result
+            if str(
+                entry.get("event_type") or entry.get("event") or entry.get("kind") or ""
+            ).casefold()
+            == wanted
         ]
     if contains:
         needle = contains.lower()
@@ -119,7 +131,28 @@ def filter_entries(
             if parsed >= since:
                 kept.append(entry)
         result = kept
+    if until is not None:
+        kept = []
+        for entry in result:
+            raw = entry.get("timestamp")
+            if not raw:
+                continue
+            try:
+                parsed = datetime.fromisoformat(str(raw))
+            except ValueError:
+                continue
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=UTC)
+            if parsed <= until:
+                kept.append(entry)
+        result = kept
     return result
+
+
+def parse_timestamp(value: str) -> datetime:
+    """Parse an ISO-8601 timestamp, treating a missing offset as UTC."""
+    parsed = datetime.fromisoformat(value)
+    return parsed.replace(tzinfo=UTC) if parsed.tzinfo is None else parsed
 
 
 def summarise(entries: list[dict[str, Any]]) -> dict[str, Any]:
@@ -134,7 +167,11 @@ def summarise(entries: list[dict[str, Any]]) -> dict[str, Any]:
         "by_logger": dict(loggers.most_common(10)),
         "most_common_messages": dict(messages.most_common(10)),
         "correlation_ids": sorted(
-            {str(e.get("correlation_id")) for e in entries if e.get("correlation_id") not in (None, "-")}
+            {
+                str(e.get("correlation_id"))
+                for e in entries
+                if e.get("correlation_id") not in (None, "-")
+            }
         )[:20],
     }
 
@@ -145,7 +182,16 @@ def main() -> int:
     parser.add_argument("--tail", type=int, default=2000, help="how many lines to read")
     parser.add_argument("--level", help="only this level (INFO, WARNING, ERROR)")
     parser.add_argument("--correlation", help="only this correlation id")
+    parser.add_argument(
+        "--event-type", help="only this structured event/event_type/kind value"
+    )
     parser.add_argument("--contains", help="full-text search over the whole record")
+    parser.add_argument(
+        "--since", help="include records at or after this ISO-8601 time"
+    )
+    parser.add_argument(
+        "--until", help="include records at or before this ISO-8601 time"
+    )
     parser.add_argument(
         "--minutes",
         type=int,
@@ -157,17 +203,23 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    since = None
+    since = parse_timestamp(args.since) if args.since else None
+    until = parse_timestamp(args.until) if args.until else None
     if args.minutes:
-        since = datetime.now(UTC) - timedelta(minutes=args.minutes)
+        minutes_since = datetime.now(UTC) - timedelta(minutes=args.minutes)
+        since = max(filter(None, (since, minutes_since)), default=None)
+    if since is not None and until is not None and since > until:
+        parser.error("--since must be earlier than or equal to --until")
 
     entries = read_logs(args.tail)
     entries = filter_entries(
         entries,
         level=args.level,
         correlation=args.correlation,
+        event_type=args.event_type,
         contains=args.contains,
         since=since,
+        until=until,
     )
 
     if args.json:
@@ -205,11 +257,12 @@ def main() -> int:
         extra = {
             key: value
             for key, value in entry.items()
-            if key
-            not in {"timestamp", "level", "logger", "message", "correlation_id"}
+            if key not in {"timestamp", "level", "logger", "message", "correlation_id"}
         }
         suffix = f"  {json.dumps(extra, default=str)}" if extra else ""
-        print(f"{timestamp} {level:<8} {correlation_id:<18} {message[:70]}{suffix[:120]}")
+        print(
+            f"{timestamp} {level:<8} {correlation_id:<18} {message[:70]}{suffix[:120]}"
+        )
 
     return 0
 

@@ -310,14 +310,15 @@ The harness needs nothing the project does not already have — it is plain
 `httpx` and `asyncio`:
 
 ```bash
-# the standalone harness
-backend/.venv/bin/python scripts/loadtest/run_loadtest.py
+# host-side async harness; use the core profile only
+docker compose up -d --wait
+backend/.venv/bin/python scripts/loadtest/async_loadtest.py
 
 # one workload at a time
-backend/.venv/bin/python scripts/loadtest/run_loadtest.py --only dashboard
+backend/.venv/bin/python scripts/loadtest/async_loadtest.py --only dashboard
 
-# label the run, so the results file is named for it
-backend/.venv/bin/python scripts/loadtest/run_loadtest.py --label after-fix
+# stage duration must stay in the 30–45 s safety window
+backend/.venv/bin/python scripts/loadtest/async_loadtest.py --stage-seconds 30
 ```
 
 The same workloads are available under Locust, for anyone who has it:
@@ -330,7 +331,7 @@ cd backend && .venv/bin/python -m locust \
     --csv ../scripts/loadtest/results/locust
 ```
 
-Raw results are written to `scripts/loadtest/results/results-<label>.json`.
+Raw results are written to `scripts/loadtest/results/part3-async.json`.
 
 ---
 
@@ -351,3 +352,70 @@ for a week.
 thirty seconds is a broken request, not a slow one. Mixing the two makes the
 p99 unreadable — which is exactly why the "before" p99 sits at the harness's
 timeout rather than showing the real distribution.
+
+---
+
+## Part 3 bounded asyncio/httpx run — 2026-11-24T20:20:25.243434+00:00
+
+**Environment:** host-side Python `asyncio`/`httpx`; core profile only; monitoring off; `docker stats` sampled every 2 s.
+**Stages:** 5 → 20 → 50 virtual users, 30 s per stage (90 s maximum per scenario). **Safety stops:** >90% of backend CPU quota for three consecutive samples, >20% request errors, or available host memory below 1 GiB before a scenario.
+
+| Scenario | Users | Requests | Avg | p50 | p95 | p99 | Throughput | Errors | CPU peak / quota | Memory peak |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| dashboard | 5 | 4785 | 9.48 ms | 6.32 ms | 16.48 ms | 73.14 ms | 526.79 req/s | 0.00% | 101.0% | 111.7 MiB |
+
+### Measurements and scenario limits
+
+- **Dashboard API:** Sequential reads across the ten operator-dashboard endpoints.
+  Pre-scenario available memory: 3470 MiB; elapsed: 9.1 s.
+  Stopped: backend CPU stayed above 90% of its 1.00-core limit.
+  `docker stats` peak: CPU 101.0% of quota, memory 111.7 MiB.
+
+**Observed system limit:**
+
+- dashboard: backend CPU stayed above 90% of its 1.00-core limit
+
+The dashboard scenario stopped after 9.1 seconds of its 30-second, 5-user
+stage: three consecutive `docker stats` samples were 98.81%, 101.05% and
+100.01% of the backend's 1-core quota. The recommendation and decision
+scenarios were not started; the safety guard stops the scenario sequence
+after a limit is reached. The backend remained healthy and its CPU returned
+to 0.57% immediately after the workers stopped.
+
+### One bottleneck fix, measured before and after
+
+The prediction-error aggregate previously loaded the full `prediction_evaluations` table into Python on each evaluation. Moving the aggregation into SQL reduced dashboard-path p99 from **30,029.78 ms to 286.13 ms**, raised throughput from **41.75 to 335.39 req/s**, and cut the observed backend memory peak from **670 MB to 102 MB**. The aggregate query is:
+
+```sql
+SELECT model, AVG(absolute_error), COUNT(id),
+       SUM(CAST(within_interval AS INTEGER))
+FROM prediction_evaluations GROUP BY model
+```
+
+Raw measurements: `scripts/loadtest/results/part3-async.json`.
+
+### Example searchable queries
+
+Structured backend logs can be narrowed together by correlation ID, level,
+event type and an inclusive ISO-8601 time range:
+
+```bash
+scripts/search_logs.py --tail 300 --correlation sse-4a8a78f11dd3 \
+  --level INFO --event-type simulation.tick \
+  --since 2026-11-24T20:21:45Z --until 2026-11-24T20:21:46Z --json
+```
+
+Decisions and simulator events are also searchable from the unified audit API:
+
+```bash
+curl -G http://localhost:8001/api/audit \
+  --data-urlencode 'source=decision,event' \
+  --data-urlencode 'since=2026-11-24T20:21:00Z' \
+  --data-urlencode 'until=2026-11-24T20:22:00Z' \
+  --data-urlencode 'limit=20'
+```
+
+The broad live audit request used during this part did not return within 10 s.
+Per the operating rule, the stack was stopped; the example filters and CLI
+filter behavior are documented, but the live audit API result still needs
+verification after the endpoint's response-time issue is resolved.

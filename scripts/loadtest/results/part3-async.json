@@ -1,0 +1,47 @@
+{
+  "generated_at": "2026-11-24T20:20:25.243147+00:00",
+  "base_url": "http://localhost:8001",
+  "stage_seconds": 30,
+  "cpu_limit_cores": 1.0,
+  "results": [
+    {
+      "name": "dashboard",
+      "started_at": "2026-11-24T20:20:16.147542+00:00",
+      "finished_at": "2026-11-24T20:20:25.242877+00:00",
+      "available_memory_before_mib": 3470.171875,
+      "stages": [
+        {
+          "users": 5,
+          "requested_seconds": 30,
+          "elapsed_seconds": 9.08,
+          "requests": 4785,
+          "throughput_rps": 526.79,
+          "error_rate": 0.0,
+          "conflicts": 0,
+          "average_ms": 9.48,
+          "p50_ms": 6.32,
+          "p95_ms": 16.48,
+          "p99_ms": 73.14,
+          "cpu_percent_of_limit": [
+            98.81,
+            101.05,
+            100.01
+          ],
+          "memory_mib": [
+            111.7,
+            110.6,
+            110.3
+          ],
+          "host_load_average": [
+            1.88623046875,
+            2.0556640625,
+            2.05078125
+          ],
+          "stop_reason": "backend CPU stayed above 90% of its 1.00-core limit"
+        }
+      ],
+      "stop_reason": "backend CPU stayed above 90% of its 1.00-core limit",
+      "stack_was_unresponsive": false
+    }
+  ]
+}
