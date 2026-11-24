@@ -1,6 +1,6 @@
 # Resilience report
 
-**Generated:** 2026-11-24T18:11:28.190267+00:00  
+**Generated:** 2026-11-24T19:45:15.381050+00:00  
 **Backend:** `http://localhost:8001` · **Simulator:** `http://localhost:8100`  
 **Scenarios run:** 17
 
@@ -22,12 +22,12 @@ Every fault lasted between 10 and 30 seconds — long enough to be a real incide
 | **Station outage** | crisis | 2.0s | 0.0s | RECOVERED | served all 5 dashboard endpoints |
 | **Supply shortfall** | crisis | 2.0s | 0.0s | RECOVERED | served all 5 dashboard endpoints |
 | **Combined crisis** | combined crisis | 2.0s | 0.0s | RECOVERED | served all 5 dashboard endpoints |
-| **Latency** | fault | 12.3s | 0.0s | RECOVERED | served all 5 dashboard endpoints |
+| **Latency** | fault | 12.4s | 0.0s | RECOVERED | served all 5 dashboard endpoints |
 | **Unavailable** | fault | 2.1s | 0.0s | RECOVERED | served all 5 dashboard endpoints |
 | **Error rate** | fault | 2.1s | 0.0s | RECOVERED | served all 5 dashboard endpoints |
-| **Stale data** | fault | 2.2s | 0.0s | RECOVERED | served all 5 dashboard endpoints |
+| **Stale data** | fault | 4.4s | 0.0s | RECOVERED | served all 5 dashboard endpoints |
 | **Stream disconnect** | fault | 22.5s | 0.0s | RECOVERED | served all 5 dashboard endpoints |
-| **Simulator connection-pool exhaustion** | dependency failure | 18.1s | 9.0s | RECOVERED | served all 5 dashboard endpoints |
+| **Simulator connection-pool exhaustion** | dependency failure | 18.1s | 111.4s | RECOVERED | served all 5 dashboard endpoints |
 | **Database stopped** | dependency failure | 0.1s | 2.0s | RECOVERED | served all 5 dashboard endpoints |
 | **Prediction layer disabled** | dependency failure | 0.0s | 0.0s | RECOVERED | served all 5 dashboard endpoints |
 | **Prediction layer broken** | dependency failure | 0.0s | 0.0s | RECOVERED | served all 5 dashboard endpoints |
@@ -40,6 +40,7 @@ Every fault lasted between 10 and 30 seconds — long enough to be a real incide
 
 *Nothing is broken. This is the control measurement.*
 
+- **Started at:** 2026-11-24T19:36:42.244158+00:00
 - **Expected:** the platform is healthy, fresh, and answering every endpoint
 - **Detected in:** 0.0s — the control measurement — nothing to detect
 - **The platform recommended:** no new proposals during the incident (100 already in the store)
@@ -50,9 +51,9 @@ Every fault lasted between 10 and 30 seconds — long enough to be a real incide
 | Measurement | Value |
 |---|---|
 | health status | ok |
-| simulator tick | 36873 |
-| memory before the scenario | 1,410 MB available of 7,271 MB |
-| cached state age | 2.509 s |
+| simulator tick | 3925 |
+| memory before the scenario | 1,294 MB available of 7,271 MB |
+| cached state age | 2.569 s |
 | degraded mode | False |
 | breaker state | closed |
 | simulator component | ok |
@@ -61,8 +62,9 @@ Every fault lasted between 10 and 30 seconds — long enough to be a real incide
 
 *Demand at every station triples. The network runs dry faster than the plan says.*
 
+- **Started at:** 2026-11-24T19:36:54.290168+00:00
 - **Expected:** risk levels rise, the platform proposes larger and earlier allocations
-- **Detected in:** 2.0s — the platform's event feed carries the demand_spike event (id 41, tick 36952)
+- **Detected in:** 2.0s — the platform's event feed carries the demand_spike event (id 1, tick 4005)
 - **The platform recommended:** 5 proposed during the incident (CRITICAL=5); 0 on the fallback policy; most urgent: station-coxsbazar/DIESEL for 6,000 L
 - **During the incident:** served all 5 dashboard endpoints
 - **Recovered in:** 0.0s
@@ -72,17 +74,19 @@ Every fault lasted between 10 and 30 seconds — long enough to be a real incide
 | Measurement | Value |
 |---|---|
 | baseline status | ok |
-| baseline tick | 36951 |
+| baseline tick | 4004 |
 | risk during crisis | CRITICAL=12 |
-| alerts during crisis | anomaly_demand=38, shortage_critical=62 |
+| alerts during crisis | anomaly_demand=36, shortage_critical=64 |
 | status after recovery | ok |
+| memory before the scenario | 1,271 MB available of 7,271 MB |
 
 ### Shipment delay
 
 *Incoming diesel arrivals are delayed by eight ticks.*
 
+- **Started at:** 2026-11-24T19:37:18.398382+00:00
 - **Expected:** the supply timeline shows DELAYED arrivals, and cover shortens
-- **Detected in:** 2.0s — the platform's event feed carries the shipment_delay event (id 42, tick 37110)
+- **Detected in:** 2.0s — the platform's event feed carries the shipment_delay event (id 2, tick 4163)
 - **The platform recommended:** 5 proposed during the incident (CRITICAL=5); 0 on the fallback policy; most urgent: station-coxsbazar/DIESEL for 6,000 L
 - **During the incident:** served all 5 dashboard endpoints
 - **Recovered in:** 0.0s
@@ -92,17 +96,19 @@ Every fault lasted between 10 and 30 seconds — long enough to be a real incide
 | Measurement | Value |
 |---|---|
 | baseline status | ok |
-| baseline tick | 37109 |
+| baseline tick | 4162 |
 | risk during crisis | CRITICAL=12 |
-| alerts during crisis | anomaly_demand=38, shortage_critical=62 |
+| alerts during crisis | anomaly_demand=40, shortage_critical=60 |
 | status after recovery | ok |
+| memory before the scenario | 1,204 MB available of 7,271 MB |
 
 ### Depot constraint
 
 *Every depot is marked CONSTRAINED, which cuts its dispatch capacity.*
 
+- **Started at:** 2026-11-24T19:37:42.507321+00:00
 - **Expected:** the allocator proposes smaller shipments, and the constraint is named
-- **Detected in:** 2.0s — the platform's event feed carries the depot_constraint event (id 43, tick 37267)
+- **Detected in:** 2.0s — the platform's event feed carries the depot_constraint event (id 3, tick 4321)
 - **The platform recommended:** 5 proposed during the incident (CRITICAL=5); 0 on the fallback policy; most urgent: station-coxsbazar/DIESEL for 6,000 L
 - **During the incident:** served all 5 dashboard endpoints
 - **Recovered in:** 0.0s
@@ -112,17 +118,19 @@ Every fault lasted between 10 and 30 seconds — long enough to be a real incide
 | Measurement | Value |
 |---|---|
 | baseline status | ok |
-| baseline tick | 37266 |
+| baseline tick | 4320 |
 | risk during crisis | CRITICAL=12 |
-| alerts during crisis | anomaly_demand=40, shortage_critical=60 |
+| alerts during crisis | anomaly_demand=48, shortage_critical=52 |
 | status after recovery | ok |
+| memory before the scenario | 1,234 MB available of 7,271 MB |
 
 ### Route disruption
 
 *Every route is marked DISRUPTED.*
 
+- **Started at:** 2026-11-24T19:38:06.686516+00:00
 - **Expected:** the platform routes around the cut, or refuses to route through it
-- **Detected in:** 4.0s — the platform's event feed carries the route_disruption event (id 44, tick 37423)
+- **Detected in:** 4.0s — the platform's event feed carries the route_disruption event (id 4, tick 4480)
 - **The platform recommended:** 10 proposed during the incident (CRITICAL=10); 0 on the fallback policy; most urgent: station-coxsbazar/DIESEL for 6,000 L
 - **During the incident:** served all 5 dashboard endpoints
 - **Recovered in:** 0.0s
@@ -132,17 +140,19 @@ Every fault lasted between 10 and 30 seconds — long enough to be a real incide
 | Measurement | Value |
 |---|---|
 | baseline status | ok |
-| baseline tick | 37422 |
+| baseline tick | 4479 |
 | risk during crisis | CRITICAL=12 |
-| alerts during crisis | anomaly_demand=43, shortage_critical=57 |
+| alerts during crisis | anomaly_demand=52, shortage_critical=48 |
 | status after recovery | ok |
+| memory before the scenario | 1,209 MB available of 7,271 MB |
 
 ### Station outage
 
 *Every station is marked OUTAGE, so served demand drops to zero.*
 
+- **Started at:** 2026-11-24T19:38:32.844302+00:00
 - **Expected:** outage alerts are raised for the affected stations
-- **Detected in:** 2.0s — the platform's event feed carries the station_outage event (id 45, tick 37594)
+- **Detected in:** 2.0s — the platform's event feed carries the station_outage event (id 5, tick 4651)
 - **The platform recommended:** 5 proposed during the incident (CRITICAL=5); 0 on the fallback policy; most urgent: station-coxsbazar/DIESEL for 6,000 L
 - **During the incident:** served all 5 dashboard endpoints
 - **Recovered in:** 0.0s
@@ -152,17 +162,19 @@ Every fault lasted between 10 and 30 seconds — long enough to be a real incide
 | Measurement | Value |
 |---|---|
 | baseline status | ok |
-| baseline tick | 37593 |
+| baseline tick | 4650 |
 | risk during crisis | CRITICAL=12 |
-| alerts during crisis | anomaly_demand=42, shortage_critical=58 |
+| alerts during crisis | anomaly_demand=44, shortage_critical=56 |
 | status after recovery | ok |
+| memory before the scenario | 1,156 MB available of 7,271 MB |
 
 ### Supply shortfall
 
 *Incoming diesel arrivals are cut to 40% of their planned quantity.*
 
+- **Started at:** 2026-11-24T19:38:56.981385+00:00
 - **Expected:** the platform sees less fuel coming and reacts accordingly
-- **Detected in:** 2.0s — the platform's event feed carries the supply_shortfall event (id 46, tick 37751)
+- **Detected in:** 2.0s — the platform's event feed carries the supply_shortfall event (id 6, tick 4810)
 - **The platform recommended:** 5 proposed during the incident (CRITICAL=5); 0 on the fallback policy; most urgent: station-coxsbazar/DIESEL for 6,000 L
 - **During the incident:** served all 5 dashboard endpoints
 - **Recovered in:** 0.0s
@@ -172,18 +184,20 @@ Every fault lasted between 10 and 30 seconds — long enough to be a real incide
 | Measurement | Value |
 |---|---|
 | baseline status | ok |
-| baseline tick | 37750 |
+| baseline tick | 4809 |
 | risk during crisis | CRITICAL=12 |
-| alerts during crisis | anomaly_demand=37, shortage_critical=63 |
+| alerts during crisis | anomaly_demand=40, shortage_critical=60 |
 | status after recovery | ok |
+| memory before the scenario | 1,119 MB available of 7,271 MB |
 
 ### Combined crisis
 
 *A demand spike, a route disruption, a depot constraint and a shipment delay, all active at the same time.*
 
+- **Started at:** 2026-11-24T19:39:21.077902+00:00
 - **Expected:** the platform holds together: every endpoint still answers, and the recommendations account for all four
 - **Detected in:** 2.0s — the platform's view showed all four crises at once
-- **The platform recommended:** 4 proposed during the incident (CRITICAL=4); 0 on the fallback policy; most urgent: station-coxsbazar/DIESEL for 6,000 L
+- **The platform recommended:** 5 proposed during the incident (CRITICAL=5); 0 on the fallback policy; most urgent: station-coxsbazar/DIESEL for 6,000 L
 - **During the incident:** served all 5 dashboard endpoints
 - **Recovered in:** 0.0s
 - **Outcome:** RECOVERED
@@ -193,15 +207,17 @@ Every fault lasted between 10 and 30 seconds — long enough to be a real incide
 |---|---|
 | baseline status | ok |
 | risk during crisis | CRITICAL=12 |
-| alerts during crisis | anomaly_demand=36, shortage_critical=64 |
+| alerts during crisis | anomaly_demand=41, shortage_critical=59 |
 | status after recovery | ok |
+| memory before the scenario | 1,798 MB available of 7,271 MB |
 
 ### Latency
 
 *The simulator delays every answer by twelve seconds.*
 
+- **Started at:** 2026-11-24T19:39:50.263719+00:00
 - **Expected:** the platform's own timeouts fire, and it stops waiting on the simulator
-- **Detected in:** 12.3s — the platform's own timeout fired on the simulator call
+- **Detected in:** 12.4s — the platform's own timeout fired on the simulator call
 - **The platform recommended:** no new proposals during the incident (100 already in the store)
 - **During the incident:** served all 5 dashboard endpoints
 - **Recovered in:** 0.0s
@@ -214,11 +230,13 @@ Every fault lasted between 10 and 30 seconds — long enough to be a real incide
 | breaker state | closed |
 | degraded mode | False |
 | status after recovery | ok |
+| memory before the scenario | 1,781 MB available of 7,271 MB |
 
 ### Unavailable
 
 *The simulator answers 503 to everything.*
 
+- **Started at:** 2026-11-24T19:40:14.811192+00:00
 - **Expected:** the platform goes degraded and keeps serving the last-known state
 - **Detected in:** 2.1s — the platform went into degraded mode
 - **The platform recommended:** no new proposals during the incident (100 already in the store)
@@ -233,14 +251,16 @@ Every fault lasted between 10 and 30 seconds — long enough to be a real incide
 | breaker state | closed |
 | degraded mode | True |
 | status after recovery | ok |
+| memory before the scenario | 1,664 MB available of 7,271 MB |
 
 ### Error rate
 
 *Half the simulator's answers are 500.*
 
+- **Started at:** 2026-11-24T19:40:29.019552+00:00
 - **Expected:** the platform rides through the partial failure and keeps its cache
 - **Detected in:** 2.1s — the simulator answered with injected faults
-- **The platform recommended:** 5 proposed during the incident (CRITICAL=5); 0 on the fallback policy; most urgent: station-coxsbazar/DIESEL for 6,000 L
+- **The platform recommended:** no new proposals during the incident (100 already in the store)
 - **During the incident:** served all 5 dashboard endpoints
 - **Recovered in:** 0.0s
 - **Outcome:** RECOVERED
@@ -252,14 +272,16 @@ Every fault lasted between 10 and 30 seconds — long enough to be a real incide
 | breaker state | closed |
 | degraded mode | False |
 | status after recovery | ok |
+| memory before the scenario | 1,666 MB available of 7,271 MB |
 
 ### Stale data
 
 *The simulator marks every response stale.*
 
+- **Started at:** 2026-11-24T19:40:43.268963+00:00
 - **Expected:** the cached copy is dropped rather than relabelled, and the staleness is shown
-- **Detected in:** 2.2s — the sync stopped succeeding
-- **The platform recommended:** 5 proposed during the incident (CRITICAL=5); 0 on the fallback policy; most urgent: station-coxsbazar/DIESEL for 6,000 L
+- **Detected in:** 4.4s — the sync stopped succeeding
+- **The platform recommended:** 10 proposed during the incident (CRITICAL=10); 0 on the fallback policy; most urgent: station-coxsbazar/DIESEL for 6,000 L
 - **During the incident:** served all 5 dashboard endpoints
 - **Recovered in:** 0.0s
 - **Outcome:** RECOVERED
@@ -271,14 +293,16 @@ Every fault lasted between 10 and 30 seconds — long enough to be a real incide
 | breaker state | closed |
 | degraded mode | False |
 | status after recovery | ok |
+| memory before the scenario | 1,658 MB available of 7,271 MB |
 
 ### Stream disconnect
 
 *The simulator refuses new event-stream connections with a 503.*
 
+- **Started at:** 2026-11-24T19:40:59.862553+00:00
 - **Expected:** the SSE listener reconnects with backoff, and the REST poller carries the platform through it
 - **Detected in:** 22.5s — the platform went into degraded mode
-- **The platform recommended:** 5 proposed during the incident (CRITICAL=5); 0 on the fallback policy; most urgent: station-coxsbazar/DIESEL for 6,000 L
+- **The platform recommended:** no new proposals during the incident (100 already in the store)
 - **During the incident:** served all 5 dashboard endpoints
 - **Recovered in:** 0.0s
 - **Outcome:** RECOVERED
@@ -291,41 +315,43 @@ Every fault lasted between 10 and 30 seconds — long enough to be a real incide
 | degraded mode | True |
 | the event stream reconnected | yes |
 | status after recovery | ok |
+| memory before the scenario | 1,619 MB available of 7,271 MB |
 
 ### Simulator connection-pool exhaustion
 
 *The simulator's own 15-connection SQLite pool is exhausted by a burst of concurrent heavy reads. Its requests block on the pool and then fail with 'QueuePool limit of size 5 overflow 10 reached'.*
 
+- **Started at:** 2026-11-24T19:41:34.577058+00:00
 - **Expected:** the backend's circuit breaker opens, the API degrades to cached state with an age, and every dashboard endpoint keeps answering
 - **Detected in:** 18.1s — the backend's own request timeout fired on the simulator call and the circuit breaker opened
 - **The platform recommended:** no new proposals during the incident (100 already in the store)
 - **During the incident:** served all 5 dashboard endpoints
-- **Recovered in:** 9.0s
+- **Recovered in:** 111.4s
 - **Outcome:** RECOVERED
-- **Notes:** fired 30 concurrent GET /v1/demand-history?limit=2000 at the simulator to take its pool; the simulator's pool stayed wedged — even its own /v1/health could not get a connection — so the documented restart-and-reset procedure was run
+- **Notes:** fired 30 concurrent GET /v1/demand-history?limit=2000 at the simulator to take its pool
 
 | Measurement | Value |
 |---|---|
 | baseline status | ok |
-| memory before the scenario | 1,477 MB available of 7,271 MB |
+| memory before the scenario | 1,639 MB available of 7,271 MB |
 | simulator pool | SQLAlchemy QueuePool — 5 connections + 10 overflow, pool_timeout 30 s |
 | breaker state | open |
 | degraded mode | True |
-| cached state age during the outage | 22.967 s |
+| cached state age during the outage | 23.534 s |
 | degraded reason | the circuit breaker for the simulator is open; not calling /v1/instance |
 | simulator component | unreachable |
 | the dashboard kept answering | served all 5 dashboard endpoints |
-| recovery | the simulator was restarted and reset; the platform recovered on its own once the dependency was back |
-| status after recovery | unknown |
-| memory after the scenario | 1,787 MB available of 7,271 MB |
+| status after recovery | ok |
+| memory after the scenario | 1,524 MB available of 7,271 MB |
 
 ### Database stopped
 
 *The Postgres container is stopped for under thirty seconds while the platform is serving.*
 
+- **Started at:** 2026-11-24T19:43:59.193347+00:00
 - **Expected:** the platform keeps serving its cached state, reports the database as down, does not crash, and recovers on its own when the database comes back
 - **Detected in:** 0.1s — the health endpoint reported the database as down
-- **The platform recommended:** 
+- **The platform recommended:** 20 proposed during the incident (CRITICAL=20); 0 on the fallback policy; most urgent: station-coxsbazar/DIESEL for 6,000 L
 - **During the incident:** served all 5 dashboard endpoints
 - **Recovered in:** 2.0s
 - **Outcome:** RECOVERED
@@ -333,15 +359,16 @@ Every fault lasted between 10 and 30 seconds — long enough to be a real incide
 | Measurement | Value |
 |---|---|
 | baseline status | ok |
-| cached state before the outage | age 0.965s, not degraded |
+| memory before the scenario | 1,520 MB available of 7,271 MB |
+| cached state before the outage | age 2.197s, not degraded |
 | health during the outage | degraded |
 | the dashboard kept answering | served all 5 dashboard endpoints |
-| cached state during the outage | age 1.809s, not degraded |
+| cached state during the outage | age 2.866s, not degraded |
 | degraded flag during the outage | False |
 | database component during the outage | error |
 | the platform process was still up | yes |
 | health after the restart | ok |
-| cached state after the restart | age 1.368s, not degraded |
+| cached state after the restart | age 2.538s, not degraded |
 | degraded flag after the restart | False |
 | how long the database was down | 15 s |
 
@@ -349,9 +376,10 @@ Every fault lasted between 10 and 30 seconds — long enough to be a real incide
 
 *The ML kill-switch is turned on, so the learned model stops being used and the platform falls back to the rule-based predictor. Then it is turned off again, and the learned model has to earn its way back.*
 
-- **Expected:** every forecast comes from the rule-based predictor, is flagged for a human, and the decision layer uses the fallback policy
+- **Started at:** 2026-11-24T19:44:14.560486+00:00
+- **Expected:** every forecast comes from the rule-based predictor and is flagged for a human
 - **Detected in:** 0.0s — the kill-switch endpoint confirmed the change
-- **The platform recommended:** 20 proposed during the incident (CRITICAL=20); 0 on the fallback policy; most urgent: station-coxsbazar/DIESEL for 6,000 L
+- **The platform recommended:** 29 proposed during the incident (CRITICAL=29); 0 on the fallback policy; most urgent: station-coxsbazar/DIESEL for 6,000 L
 - **During the incident:** served all 5 dashboard endpoints
 - **Recovered in:** 0.0s
 - **Outcome:** RECOVERED
@@ -359,17 +387,23 @@ Every fault lasted between 10 and 30 seconds — long enough to be a real incide
 | Measurement | Value |
 |---|---|
 | baseline status | ok |
+| memory before the scenario | 1,511 MB available of 7,271 MB |
+| the learned model was trained | trained on 3942 rows, validation MAE 0.051246 L |
+| the learned model was in service | learned |
+| how hard it was to get the model in service | in service after 1 training attempt(s) |
 | active model before | learned |
 | the forecast before | 12× learned; 0 of 12 flagged for human review | 12× reason: — |
 | kill-switch accepted | True |
 | active model | baseline |
 | ml_kill_switch | True |
 | the forecast with the model disabled | 12× baseline; 12 of 12 flagged for human review | 12× reason: the ml kill-switch is on: the learned model is disabled |
-| forecasts served by the fallback | 156.0 |
+| forecasts served by the fallback | 348.0 |
 | the kill-switch gauge | 1.0 |
-| kill-switch activations | on: 3.0, off: 2.0 |
-| decision engine's fallback reason | — |
-| active model after | learned |
+| kill-switch activations | on: 7.0, off: 6.0 |
+| the decision engine's own fallback | not engaged — the rule-based predictor still produced a forecast, so the decision engine kept using the normal optimizer |
+| the model after the kill-switch came off | learned |
+| how hard it was to earn the model back | in service after 1 training attempt(s) |
+| active model after | baseline |
 | ml_kill_switch after | False |
 | the forecast after recovery | 12× learned; 0 of 12 flagged for human review | 12× reason: — |
 
@@ -377,9 +411,10 @@ Every fault lasted between 10 and 30 seconds — long enough to be a real incide
 
 *The learned model is made to raise on every forecast — the way a broken model raises — so the platform has to notice the failure by itself rather than being told about it.*
 
+- **Started at:** 2026-11-24T19:44:44.863853+00:00
 - **Expected:** every forecast comes from the rule-based predictor, is flagged for a human, and the fallback reason names the failure
 - **Detected in:** 0.0s — the model raised and the selector fell back on its own
-- **The platform recommended:** 20 proposed during the incident (CRITICAL=20); 0 on the fallback policy; most urgent: station-coxsbazar/DIESEL for 6,000 L
+- **The platform recommended:** 25 proposed during the incident (CRITICAL=25); 0 on the fallback policy; most urgent: station-coxsbazar/DIESEL for 6,000 L
 - **During the incident:** served all 5 dashboard endpoints
 - **Recovered in:** 0.0s
 - **Outcome:** RECOVERED
@@ -387,12 +422,17 @@ Every fault lasted between 10 and 30 seconds — long enough to be a real incide
 | Measurement | Value |
 |---|---|
 | baseline status | ok |
-| the learned model was trained | trained on 2825 rows, validation MAE 0.050835 L |
-| active model before | learned |
+| memory before the scenario | 1,558 MB available of 7,271 MB |
+| the learned model was trained | trained on 3923 rows, validation MAE 0.050771 L |
+| the learned model was in service | learned |
+| how hard it was to get the model in service | in service after 1 training attempt(s) |
+| active model before | baseline |
 | the forecast before | 12× learned; 0 of 12 flagged for human review | 12× reason: — |
 | the fault was accepted | True |
-| the forecast with the model broken | 12× baseline; 12 of 12 flagged for human review | 12× reason: the learned model failed to predict: an injected prediction fault |
-| the decision engine's fallback reason | — |
+| the forecast with the model broken | 12× baseline; 12 of 12 flagged for human review | 12× reason: the learned model does not beat the rule-based baseline over the forecast horizon (106 L vs 85 L of total dema |
+| the decision engine's own fallback | not engaged — the rule-based predictor still produced a forecast, so the decision engine kept using the normal optimizer |
+| the model after the fault was cleared | learned |
+| how hard it was to earn the model back | in service after 1 training attempt(s) |
 | the forecast after recovery | 12× learned; 0 of 12 flagged for human review | 12× reason: — |
 
 ## The restart-and-reset procedure
