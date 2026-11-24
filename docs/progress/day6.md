@@ -964,12 +964,35 @@ Definition of done — Part 2
 | Detection time recorded per scenario | ✅ | In the report, and an upper bound: the drill polls every 2 s |
 | The recommendation recorded per scenario | ✅ | Count, risk levels, and the most urgent proposal |
 | Recovery time recorded per scenario | ✅ | In the report |
-| Results saved with timestamps | ✅ | `docs/resilience-report.md`, generated `2026-11-24T18:12Z` |
+| Results saved with timestamps | ✅ | `docs/resilience-report.md`, generated `2026-11-24T19:45:15.381050+00:00` |
 | The simulator's connection-pool exhaustion as a scenario | ✅ | 30 concurrent heavy reads; symptom, degradation and recovery recorded |
 | The restart/reset procedure documented | ✅ | README and the report's runbook section |
 | (a) The prediction component fails; the fallback takes over and recovers | ✅ | Kill-switch *and* an injected error — both drilled, both recovered |
-| (b) Postgres stopped under 30 s; cached state, degraded flag, no crash | ✅ | 16 s down, recovered in 2.0 s, never crashed |
+| (b) Postgres stopped under 30 s; cached state, degraded status, no crash | ✅ | 15 s down; health reported `degraded` and database `error`; cached-state `degraded` boolean remained `False`; recovered in 2.0 s, never crashed |
 | Results added to `docs/resilience-report.md` | ✅ | 17 scenarios, all with measurements |
+
+### Part 2 closeout
+
+**Completed:** 2026-11-25T02:15:20+06:00. The core-profile containers were
+stopped with `docker compose down`; no volumes were removed. The requested
+`docker system prune -f` completed and reported `0B` reclaimed. No monitoring
+containers were running.
+
+Final host readings after cleanup:
+
+```text
+free -h
+Mem:  7.1Gi total, 2.6Gi used, 1.6Gi free, 3.2Gi buff/cache, 4.5Gi available
+Swap: 4.0Gi total, 470Mi used, 3.5Gi free
+
+df -h .
+/dev/nvme0n1p2  468G  321G  124G  73%  /
+```
+
+`docker compose ps` showed no running or stopped project containers after
+cleanup. The Postgres drill's overall health status was `degraded`, while the
+cached-state `degraded` boolean stayed `False`; both readings are recorded
+explicitly rather than conflated.
 
 ---
 
