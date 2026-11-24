@@ -100,6 +100,22 @@ class SyncService:
         #: simulator for no benefit, because the second one reads the same
         #: world the first one is already reading.
         self._sync_lock = asyncio.Lock()
+        #: The highest simulator tick the event stream has carried.
+        #:
+        #: This is how a live stream is told apart from a dead one. A dead
+        #: simulator's queue keeps delivering buffered events for minutes
+        #: after the simulator has gone, so "bytes are still arriving"
+        #: proves nothing. The stream's own tick is the evidence: if the
+        #: platform's REST view says the world has moved on and the stream
+        #: has not, the stream is describing a world that no longer
+        #: exists.
+        self._sse_highest_tick = 0
+        #: When the stream was first seen to be behind the world.
+        self._sse_behind_since: float | None = None
+        #: The refreshes the SSE reader has scheduled but not waited for.
+        #: The tasks are held so they cannot be garbage-collected while
+        #: they are still running.
+        self._refresh_tasks: set[asyncio.Task[None]] = set()
         #: How many sync requests have been made. A cycle settles every
         #: request that was outstanding when it started.
         self._sync_requests = 0
@@ -512,7 +528,31 @@ class SyncService:
                             "entity_id": event.entity_id,
                         },
                     )
+                    # A tick event carries the simulator's own tick number.
+                    #: Remember the highest one the stream has carried, so
+                    #: the loop can tell a live stream from a dead one.
+                    if event.is_tick:
+                        tick = event.data.get("tick")
+                        if isinstance(tick, int) and tick > self._sse_highest_tick:
+                            self._sse_highest_tick = tick
                     await self._handle_event(event)
+
+                    # The stream can be *alive* and still be telling lies.
+                    # A dead simulator's event queue holds up to two
+                    #: hundred buffered events, and they keep arriving for
+                    #: minutes after the simulator has gone — each one
+                    #: resetting every read timeout. The platform would
+                    #: carry on processing events from a dependency that
+                    #: had already died, and would never reconnect.
+                    #:
+                    #: So the stream is checked against the world it
+                    #: claims to describe. If the simulator has moved on
+                    #: but the stream's tick has not, the stream is stale
+                    #: and is dropped so the loop reconnects.
+                    if await self._sse_stream_is_stale():
+                        raise SimulatorTimeoutError(
+                            "the simulator event stream is behind the world; reconnecting"
+                        )
 
                 # The stream ended normally: the server closed it.
                 reason = "closed"
@@ -586,6 +626,16 @@ class SyncService:
 
         The result is that the simulator sees at most one cycle in flight
         and one pending, whatever the tick rate.
+
+        **Why the caller does not wait.** The caller is the SSE reader, and
+        the reader is the one thing that must stay responsive. If it waited
+        for the cycle to finish, it would stop reading the stream while the
+        cycle ran — and the simulator's event queue is only two hundred deep.
+        A reader that stops reading fills that queue, and the simulator then
+        *unsubscribes* the platform: the stream stays open, keeps sending
+        keepalives, and delivers nothing but the truth about a world that
+        has moved on. The platform would be looking at a live-looking but
+        permanently silent feed.
         """
         self._sync_requests += 1
         my_generation = self._sync_requests
@@ -623,30 +673,98 @@ class SyncService:
             # the next one instead of each getting their own.
             SYNC_CYCLES_COALESCED.inc(self._sync_requests - target)
 
+    async def _sse_stream_is_stale(self) -> bool:
+        """Whether the event stream has fallen behind the world it describes.
+
+        The simulator's event stream is a *hint* channel, and the hint is
+        only useful while it is current. A dead simulator's queue holds up
+        to two hundred buffered events, and they keep arriving for minutes
+        after the simulator has gone — so a stream can look perfectly
+        alive (bytes are still flowing) while describing a world that no
+        longer exists.
+
+        The check compares the stream against the platform's own REST view
+        of the world, which is read on its own schedule and is therefore
+        independent of the stream:
+
+        * If the REST view says the simulator is at tick *N* and the
+          stream has not reached *N* after a grace period, the stream is
+          behind and is dropped so the loop reconnects.
+        * If the REST view cannot be read at all, the simulator is down
+          and the stream cannot be trusted either.
+
+        The grace period matters. The stream and the REST view are read at
+        different moments, so they are briefly out of step by design; a
+        stream that is a few ticks behind is normal.
+        """
+        state = self._cache.state
+        if state is None:
+            return False
+
+        live_tick = state.instance.tick
+        if live_tick <= self._sse_highest_tick:
+            # The stream is at or ahead of the world the platform can see.
+            # Any clock that was running stops here: a stream that caught up
+            # has just proved it is alive, and it must not be punished later
+            # for a lag it has already recovered from.
+            self._sse_behind_since = None
+            return False
+
+        # The stream is behind. Give it a moment before calling it dead.
+        if self._sse_behind_since is None:
+            self._sse_behind_since = time.monotonic()
+            return False
+        if time.monotonic() - self._sse_behind_since < self._settings.sse_stale_grace:
+            return False
+
+        logger.warning(
+            "the simulator event stream fell behind the world; dropping it",
+            extra={
+                "stream_tick": self._sse_highest_tick,
+                "world_tick": live_tick,
+            },
+        )
+        self._sse_behind_since = None
+        self._sse_highest_tick = 0
+        return True
+
     async def _handle_event(self, event: StreamEvent) -> None:
         """React to an SSE event by re-reading the affected resource.
 
         The event payload is only a hint. The simulator explicitly documents
         that the queue can drop events, so the payload is never written to
         the database directly — it decides *what to re-read*.
+
+        **This must not block the reader.** The SSE reader is the one thing
+        that has to stay responsive, because the simulator's event queue is
+        only two hundred deep and the simulator *unsubscribes* a client
+        whose queue overflows. A reader that waits for a sync cycle to
+        finish stops reading while the cycle runs, the queue fills, and the
+        feed goes silently dead — while still looking perfectly alive, because
+        the socket stays open and the simulator keeps sending keepalives.
+
+        So the refreshes are *scheduled*, not awaited: the request is raised
+        and the reader moves straight on to the next event. The work still
+        happens, in the same order, and it is still collapsed into one
+        cycle — it just no longer holds the reader hostage while it runs.
         """
         try:
             if event.is_tick:
-                await self._request_sync()
+                self._schedule_refresh(self._request_sync())
                 return
 
             if event.is_allocation:
-                await self._refresh_allocations()
+                self._schedule_refresh(self._refresh_allocations())
                 return
 
             if event.is_inventory:
-                await self._refresh_inventory(event.entity_id)
+                self._schedule_refresh(self._refresh_inventory(event.entity_id))
                 return
 
             if event.is_notice:
                 # A notice means the simulator itself did something (a reset,
                 # or a background-runner exception). Re-read the whole world.
-                await self._request_sync()
+                self._schedule_refresh(self._request_sync())
         except SimulatorAPIError as exc:
             logger.warning(
                 "could not refresh after an sse event",
@@ -657,6 +775,46 @@ class SyncService:
                 "simulator unreachable while refreshing after an sse event",
                 extra={"event": event.event, "error": str(exc)},
             )
+
+    def _schedule_refresh(self, coro) -> None:
+        """Start a refresh without waiting for it, and keep it alive.
+
+        The coroutine is scheduled on the running loop and its task is
+        held until it finishes, so it cannot be garbage-collected
+        half-way through — which would leave a sync cycle half-done and
+        the cache half-written.
+
+        A refresh that raises is logged and dropped. The reader is not
+        allowed to die because a *refresh* failed: the refresh is the
+        optional part, and the reader is the part that has to keep working.
+        """
+        task = asyncio.create_task(self._run_refresh(coro), name="sse-refresh")
+        self._refresh_tasks.add(task)
+        task.add_done_callback(self._refresh_tasks.discard)
+
+    async def _run_refresh(self, coro) -> None:
+        """Run one refresh, swallowing and logging whatever it raises."""
+        try:
+            await coro
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning(
+                "an sse-triggered refresh failed",
+                extra={"error": str(exc)},
+            )
+
+    async def _await_refreshes(self) -> None:
+        """Wait for the scheduled refreshes to finish.
+
+        Used when the service is stopping, and by the tests: a refresh is
+        *scheduled* rather than awaited so the SSE reader is never held up
+        by it, which means there is no single point at which "the refresh
+        has happened" can be observed.
+        """
+        while self._refresh_tasks:
+            pending = list(self._refresh_tasks)
+            await asyncio.gather(*pending, return_exceptions=True)
 
     async def _refresh_allocations(self) -> None:
         """Re-read the allocation ledger and mirror it.

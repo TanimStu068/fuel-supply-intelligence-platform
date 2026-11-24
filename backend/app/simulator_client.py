@@ -497,11 +497,25 @@ class SimulatorClient:
         The generator ends when the server closes the connection. A
         ``stream_disconnect`` fault makes the endpoint answer ``503``
         immediately, which surfaces as :class:`FaultInjectedError`.
+
+        **The read timeout is bounded, and it has to be.** The simulator
+        sends a keepalive every fifteen seconds, so a stream that has been
+        silent for longer than that is *dead*, not quiet. With no read
+        timeout at all, a connection whose far end has gone away produces
+        neither data nor an error: the reader waits forever on a socket
+        that will never answer, and the platform never notices that its
+        event feed is gone. That is not a hypothetical — it is what a
+        stopped simulator does, and the platform kept believing it had a
+        live stream long after the connection had died.
+
+        So the read timeout is set to a small multiple of the keepalive
+        interval. A live simulator is never silent for that long, and a
+        dead one is noticed within half a minute.
         """
         timeout_config = httpx.Timeout(
             timeout if timeout is not None else self._settings.simulator_request_timeout,
             connect=self._settings.simulator_connect_timeout,
-            read=None,
+            read=self._settings.sse_read_timeout,
         )
         parser = SSEParser()
 

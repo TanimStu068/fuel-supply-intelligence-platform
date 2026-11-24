@@ -43,6 +43,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import StrEnum
 
+from ..metrics import ML_KILL_SWITCH_FALLBACKS
 from .profiles import FUEL_TYPES, baseline_shape, get_profile, noise_bound
 
 logger = logging.getLogger(__name__)
@@ -1100,6 +1101,12 @@ class ForecastSelector:
             f"{baseline.explanation} Falling back to the rule-based predictor: {reason}."
         )
         self._record_fallback(reason)
+        if self._kill_switch:
+            # The kill-switch is a *deliberate* fallback, and it is the one
+            # an operator needs to see counted: it says how much of the
+            # platform's output was produced by the rule rather than by the
+            # model while the model was switched off.
+            ML_KILL_SWITCH_FALLBACKS.inc()
         return baseline
 
     def _fallback_reason(self, history: list[HistoryPoint]) -> str | None:

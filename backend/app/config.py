@@ -121,6 +121,31 @@ class Settings(BaseSettings):
     sse_reconnect_base_delay: float = Field(default=1.0, alias="SSE_RECONNECT_BASE_DELAY", gt=0)
     #: Ceiling for the SSE reconnect backoff.
     sse_reconnect_max_delay: float = Field(default=30.0, alias="SSE_RECONNECT_MAX_DELAY", gt=0)
+    #: How long the event stream may stay silent before it is considered dead.
+    #:
+    #: The simulator sends a keepalive every fifteen seconds, so a stream
+    #: that has been silent for longer than that is not quiet — it is
+    #: broken. This has to be bounded: with no read timeout at all, a
+    #: connection whose far end has gone away produces neither data nor an
+    #: error, so the reader waits forever on a socket that will never
+    #: answer and the platform never notices that its event feed is gone.
+    #:
+    #: Two keepalive intervals is the default: long enough that a live but
+    #: idle simulator is never mistaken for a dead one, short enough that a
+    #: dead simulator is noticed within half a minute.
+    sse_read_timeout: float = Field(default=30.0, alias="SSE_READ_TIMEOUT", gt=0)
+    #: How long the event stream may lag behind the world before it is dropped.
+    #:
+    #: The stream and the REST view are read at different moments, so they
+    #: are briefly out of step by design — a stream that is a few ticks
+    #: behind is normal, not broken. This is the grace period before a
+    #: lagging stream is treated as dead and dropped, so the listener can
+    #: reconnect.
+    #:
+    #: It has to be long enough to cover the world's own polling
+    #: interval, and short enough that a genuinely dead stream is noticed
+    #: while it still matters.
+    sse_stale_grace: float = Field(default=45.0, alias="SSE_STALE_GRACE", gt=0)
     #: How many demand observations to pull per ingest cycle.
     demand_history_limit: int = Field(default=500, alias="DEMAND_HISTORY_LIMIT", gt=0)
     #: How many recommendations the decision engine's working set keeps.

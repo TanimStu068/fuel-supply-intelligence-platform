@@ -475,6 +475,7 @@ async def test_tick_event_triggers_a_full_sync(service, client, cache) -> None:
     ]
 
     await service._handle_event(client.stream_events[0])
+    await service._await_refreshes()
 
     assert client.instance_calls >= 1
     assert cache.has_state is True
@@ -489,6 +490,7 @@ async def test_allocation_event_refreshes_only_the_ledger(service, client) -> No
     before = client.instance_calls
 
     await service._handle_event(client.stream_events[0])
+    await service._await_refreshes()
 
     assert client.allocation_calls == 1
     # No full refetch: the ledger is the only thing that changed.
@@ -506,6 +508,7 @@ async def test_inventory_event_refreshes_one_entity(service, client) -> None:
     ]
 
     await service._handle_event(client.stream_events[0])
+    await service._await_refreshes()
 
     assert client.depot_calls == 1
     assert client.station_calls == 0
@@ -519,6 +522,7 @@ async def test_notice_event_triggers_a_full_sync(service, client, cache) -> None
     ]
 
     await service._handle_event(client.stream_events[0])
+    await service._await_refreshes()
 
     assert client.instance_calls >= 1
     assert cache.has_state is True
@@ -552,6 +556,69 @@ async def test_stream_reconnect_triggers_a_full_rest_refetch(service, client, ca
     assert client.instance_calls >= 2
 
 
+async def test_the_sse_reader_does_not_wait_for_the_sync(settings, client, database, cache) -> None:
+    """The reader must keep reading while a sync cycle is running.
+
+    This is the bug the crisis drill found. The reader used to await the
+    sync it triggered, so it stopped reading the stream for the whole
+    duration of the cycle. The simulator's event queue is two hundred deep
+    and the simulator *unsubscribes* a client whose queue overflows — so a
+    reader that stops reading gets silently dropped, and the feed goes
+    dead while still looking alive (the socket stays open and the
+    simulator keeps sending keepalives).
+
+    The test makes the sync slow, so a reader that waits would only get
+    through one event before the queue would be filling up.
+    """
+    from app.sse import StreamEvent
+
+    events = [
+        StreamEvent(event="simulation.tick", data={"tick": n, "sim_time": "2026-01-01T00:15:00"})
+        for n in range(1, 21)
+    ]
+    client.stream_events = events
+    client.stream_ends_after = len(events)
+
+    # Every read of the world takes a while, so a reader that waits for
+    # the cycle would fall far behind.
+    async def slow_get_instance():
+        await asyncio.sleep(0.05)
+        return await _FakeClient.get_instance(client)
+
+    client.get_instance = slow_get_instance  # type: ignore[method-assign]
+
+    service = SyncService(client=client, database=database, cache=cache, settings=settings)
+    service._stopping = asyncio.Event()
+
+    task = asyncio.create_task(service._sse_loop())
+    await asyncio.sleep(0.3)
+    service._stopping.set()
+    task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await task
+
+    # The reader got through every event, without waiting for the sync.
+    assert client.instance_calls >= 1
+    assert service._sse_highest_tick == 20
+
+
+async def test_a_failed_refresh_does_not_kill_the_reader(service, client) -> None:
+    """A refresh that raises must not take the SSE reader down with it.
+
+    The refresh is the optional part of the reaction to an event; the
+    reader is the part that has to keep working.
+    """
+
+    async def boom():
+        raise RuntimeError("the refresh failed")
+
+    service._schedule_refresh(boom())
+    await asyncio.sleep(0.05)
+
+    # The task finished, and it did not raise into the caller.
+    assert not service._refresh_tasks
+
+
 async def test_stream_fault_503_is_a_reconnect_not_a_crash(service, client) -> None:
     """A stream_disconnect fault answers 503; the loop must survive it."""
     client.stream_error = SimulatorAPIError(
@@ -574,6 +641,182 @@ async def test_stream_fault_503_is_a_reconnect_not_a_crash(service, client) -> N
 
 
 # -- demand history --------------------------------------------------------
+
+
+# -- a dead event stream ----------------------------------------------------
+#
+# A simulator that dies leaves its event queue full of buffered events, and
+# those keep arriving for minutes — so "bytes are still arriving" proves
+# nothing. The stream has to be checked against the world it claims to
+# describe, and dropped when it falls behind.
+
+
+async def test_a_stream_that_falls_behind_the_world_is_dropped(
+    settings, client, database, cache
+) -> None:
+    """A stream whose tick never catches up must be dropped, not trusted.
+
+    This is the bug the crisis drill found: with the simulator stopped, the
+    platform kept a live-looking stream for minutes, because the dead
+    simulator's buffered events kept arriving and kept resetting every read
+    timeout. The platform believed it had an event feed long after the feed
+    was gone.
+    """
+    from app.simulator_models import Instance, Metrics
+    from app.state_cache import CachedState
+
+    # A world at tick 40, read over REST by the poller.
+    cache.store(
+        CachedState(
+            instance=Instance.model_validate(
+                {
+                    "id": 1,
+                    "scenario_id": "baseline",
+                    "scenario_version": "1.0",
+                    "seed": 1,
+                    "sim_time": "2026-01-01T00:00:00+00:00",
+                    "tick": 40,
+                    "tick_minutes": 15,
+                    "status": "RUNNING",
+                }
+            ),
+            regions=[],
+            depots=[],
+            stations=[],
+            routes=[],
+            supply_arrivals=[],
+            events=[],
+            allocations=[],
+            metrics=Metrics.model_validate(
+                {
+                    "served_demand_liters": 1.0,
+                    "unmet_demand_liters": 0.0,
+                    "service_level": 1.0,
+                    "allocation_liters": 0.0,
+                    "allocation_failures": 0,
+                }
+            ),
+        )
+    )
+
+    # The stream is stuck at tick 3 — an old, buffered event.
+    service = SyncService(client=client, database=database, cache=cache, settings=settings)
+    service._sse_highest_tick = 3
+
+    # The first observation only starts the clock: a stream that is a few
+    # ticks behind is normal, not broken.
+    assert await service._sse_stream_is_stale() is False
+    assert service._sse_behind_since is not None
+
+    # After the grace period, the stream is behind and is dropped.
+    service._sse_behind_since = service._sse_behind_since - (settings.sse_stale_grace + 1)
+    assert await service._sse_stream_is_stale() is True
+
+    # The bookkeeping is reset, so the next stream starts from scratch.
+    assert service._sse_highest_tick == 0
+    assert service._sse_behind_since is None
+
+
+async def test_a_stream_that_catches_up_is_not_dropped(settings, client, database, cache) -> None:
+    """A stream that is briefly behind but catches up must survive.
+
+    The stream and the REST view are read at different moments, so they are
+    briefly out of step by design. Only a stream that *stays* behind is
+    broken.
+    """
+    from app.simulator_models import Instance, Metrics
+    from app.state_cache import CachedState
+
+    cache.store(
+        CachedState(
+            instance=Instance.model_validate(
+                {
+                    "id": 1,
+                    "scenario_id": "baseline",
+                    "scenario_version": "1.0",
+                    "seed": 1,
+                    "sim_time": "2026-01-01T00:00:00+00:00",
+                    "tick": 40,
+                    "tick_minutes": 15,
+                    "status": "RUNNING",
+                }
+            ),
+            regions=[],
+            depots=[],
+            stations=[],
+            routes=[],
+            supply_arrivals=[],
+            events=[],
+            allocations=[],
+            metrics=Metrics.model_validate(
+                {
+                    "served_demand_liters": 1.0,
+                    "unmet_demand_liters": 0.0,
+                    "service_level": 1.0,
+                    "allocation_liters": 0.0,
+                    "allocation_failures": 0,
+                }
+            ),
+        )
+    )
+
+    service = SyncService(client=client, database=database, cache=cache, settings=settings)
+    service._sse_highest_tick = 3
+
+    assert await service._sse_stream_is_stale() is False
+    assert service._sse_behind_since is not None
+
+    # The stream catches up: the world has not moved on past it.
+    service._sse_highest_tick = 40
+
+    assert await service._sse_stream_is_stale() is False
+    # The clock is reset, so a later lag is judged on its own merits.
+    assert service._sse_behind_since is None
+
+
+async def test_a_stream_at_the_world_tick_is_never_stale(settings, client, database, cache) -> None:
+    """A stream exactly at the world's tick is healthy, by definition."""
+    from app.simulator_models import Instance, Metrics
+    from app.state_cache import CachedState
+
+    cache.store(
+        CachedState(
+            instance=Instance.model_validate(
+                {
+                    "id": 1,
+                    "scenario_id": "baseline",
+                    "scenario_version": "1.0",
+                    "seed": 1,
+                    "sim_time": "2026-01-01T00:00:00+00:00",
+                    "tick": 40,
+                    "tick_minutes": 15,
+                    "status": "RUNNING",
+                }
+            ),
+            regions=[],
+            depots=[],
+            stations=[],
+            routes=[],
+            supply_arrivals=[],
+            events=[],
+            allocations=[],
+            metrics=Metrics.model_validate(
+                {
+                    "served_demand_liters": 1.0,
+                    "unmet_demand_liters": 0.0,
+                    "service_level": 1.0,
+                    "allocation_liters": 0.0,
+                    "allocation_failures": 0,
+                }
+            ),
+        )
+    )
+
+    service = SyncService(client=client, database=database, cache=cache, settings=settings)
+    service._sse_highest_tick = 40
+
+    assert await service._sse_stream_is_stale() is False
+    assert service._sse_behind_since is None
 
 
 async def test_ingest_demand_history_calls_the_simulator(service, client) -> None:
