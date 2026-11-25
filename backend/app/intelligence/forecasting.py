@@ -1075,21 +1075,7 @@ class ForecastSelector:
         if self._learned.is_trained:
             model = self._learned.model
             if model and model.training_rows >= self._config.min_training_rows:
-                model_horizon = model.metadata.get("horizon_total_mae_liters")
-                baseline_horizon = model.metadata.get("baseline_horizon_total_mae_liters")
-                if (
-                    model_horizon is not None
-                    and baseline_horizon is not None
-                    and float(model_horizon) >= float(baseline_horizon)
-                ):
-                    return ModelKind.BASELINE
-
-                baseline_mae = model.metadata.get("baseline_validation_mae")
-                if (
-                    baseline_mae is not None
-                    and model.validation_mae >= float(baseline_mae)
-                    and (model_horizon is None or baseline_horizon is None)
-                ):
+                if self._model_is_beaten_by_the_baseline(model):
                     return ModelKind.BASELINE
 
                 # The kill-switch overrides every check above: with it on,
@@ -1154,6 +1140,46 @@ class ForecastSelector:
             ML_KILL_SWITCH_FALLBACKS.inc()
         return baseline
 
+    @staticmethod
+    def _model_is_beaten_by_the_baseline(model: LearnedModel) -> bool:
+        """Whether the rule-based baseline is at least as good as the model.
+
+        The horizon score is the decisive evidence, because the model is
+        *used* over a whole horizon and so it is *judged* over a whole
+        horizon. The one-step score only decides when there is no horizon
+        score at all.
+
+        **A score of zero is not a score.** A model whose horizon error
+        has not been computed yet carries ``0.0`` for both its own error
+        and the baseline's, and ``0.0 >= 0.0`` would reject a perfectly
+        good model as "worse than the baseline". The horizon validator
+        fills both numbers in together, so a zero on either side means
+        "not measured yet" and the model is given the benefit of the
+        doubt until it is actually scored.
+        """
+        model_horizon = model.metadata.get("horizon_total_mae_liters")
+        baseline_horizon = model.metadata.get("baseline_horizon_total_mae_liters")
+
+        if (
+            model_horizon is not None
+            and baseline_horizon is not None
+            and float(model_horizon) > 0.0
+            and float(baseline_horizon) > 0.0
+        ):
+            return float(model_horizon) >= float(baseline_horizon)
+
+        baseline_mae = model.metadata.get("baseline_validation_mae")
+        if baseline_mae is None or float(baseline_mae) <= 0.0:
+            return False
+
+        # The one-step score only decides when the horizon score is
+        # missing — otherwise the horizon result is the better evidence
+        # and has already decided.
+        if model_horizon is None or baseline_horizon is None:
+            return model.validation_mae >= float(baseline_mae)
+
+        return False
+
     def _fallback_reason(self, history: list[HistoryPoint]) -> str | None:
         """Why the learned model cannot be used, or ``None`` if it can."""
         # The kill-switch is checked first: when it is on the learned model
@@ -1187,6 +1213,8 @@ class ForecastSelector:
         if (
             model_horizon is not None
             and baseline_horizon is not None
+            and float(model_horizon) > 0.0
+            and float(baseline_horizon) > 0.0
             and float(model_horizon) >= float(baseline_horizon)
         ):
             return (
@@ -1207,6 +1235,7 @@ class ForecastSelector:
         baseline_mae = model.metadata.get("baseline_validation_mae")
         if (
             baseline_mae is not None
+            and float(baseline_mae) > 0.0
             and model.validation_mae >= float(baseline_mae)
             and (model_horizon is None or baseline_horizon is None)
         ):

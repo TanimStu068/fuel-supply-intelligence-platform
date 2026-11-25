@@ -395,8 +395,12 @@ export const serviceHealthFixture: ServiceHealth = {
     prediction_service: {
       status: 'ok',
       active_model: 'baseline',
+      fallback_active: false,
+      fallback_reasons: {},
+      ml_kill_switch: false,
       evaluated_at: '2026-01-03T15:14:00+00:00',
       forecast_count: 12,
+      needs_human_review_count: 0,
     },
     decision_engine: {
       status: 'ok',

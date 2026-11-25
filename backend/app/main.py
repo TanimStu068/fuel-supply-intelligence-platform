@@ -39,7 +39,7 @@ from .db import database as default_database
 from .decision.service import DecisionError, DecisionService
 from .intelligence.dispatcher import Dispatcher
 from .intelligence.engine import IntelligenceEngine
-from .intelligence.forecasting import ForecastSelector, ForecastSelectorConfig
+from .intelligence.forecasting import ForecastSelector, ForecastSelectorConfig, ModelKind
 from .intelligence.risk import RiskLevel
 from .intelligence_service import IntelligenceService
 from .logging_config import configure_logging
@@ -798,7 +798,15 @@ async def set_kill_switch(
 class PredictionFaultRequest(BaseModel):
     """The body of a prediction-fault update."""
 
-    #: The fault to inject: ``"predict_error"``, or ``None`` to clear it.
+    #: The fault to inject, or ``None`` to clear it.
+    #:
+    #: ``"predict_error"``
+    #:     The learned model raises. The selector answers with the
+    #:     rule-based *predictor*.
+    #:
+    #: ``"evaluate_error"``
+    #:     The whole intelligence evaluation raises. The decision layer
+    #:     falls back to the rule-based *policy*.
     fault: str | None = None
 
 
@@ -826,16 +834,28 @@ async def set_prediction_fault(
     human — and the difference is in the reason the forecast carries.
     """
     fault = service.inject_prediction_fault(body.fault)
+
+    if fault == "evaluate_error":
+        effect = (
+            "the intelligence layer will fail to evaluate the network; the "
+            "decision layer falls back to the rule-based days-of-cover policy, "
+            "with lower confidence and every recommendation flagged for a human"
+        )
+    elif fault:
+        effect = (
+            "the learned model will raise on every forecast; every forecast "
+            "falls back to the rule-based predictor and is flagged for human review"
+        )
+    else:
+        effect = (
+            "the injected fault is cleared; the learned model is used again, "
+            "subject to the normal confidence checks"
+        )
+
     return {
         "prediction_fault": fault,
         "active_model": service.engine.selector.active_model.value,
-        "effect": (
-            "the learned model will raise on every forecast; every forecast "
-            "falls back to the rule-based predictor and is flagged for human review"
-            if fault
-            else "the injected fault is cleared; the learned model is used again, "
-            "subject to the normal confidence checks"
-        ),
+        "effect": effect,
     }
 
 
@@ -1386,6 +1406,15 @@ async def service_health(
     last_result = intelligence.last_result if intelligence is not None else None
     active_model = last_result.active_model.value if last_result is not None else "unknown"
 
+    # The prediction service is only "ok" when the learned model is the
+    # one answering. When it has fallen back to the rule-based predictor
+    # the platform is still working, but it is working *degraded*, and an
+    # operator looking at the health panel has to be able to tell that
+    # apart. Reporting "ok" while the model is broken would be the one
+    # thing this panel must never do.
+    prediction_degraded = last_result is None or active_model != ModelKind.LEARNED.value
+    fallback_reasons = last_result.fallback_activations if last_result is not None else {}
+
     counters = decision.counters if decision is not None else {}
     proposed = counters.get("proposed", 0)
     approved = counters.get("approved", 0)
@@ -1396,13 +1425,18 @@ async def service_health(
             "database": database_status,
             "simulator": simulator_status,
             "prediction_service": {
-                "status": "ok" if last_result is not None else "degraded",
+                "status": "degraded" if prediction_degraded else "ok",
                 "active_model": active_model,
+                "fallback_active": prediction_degraded,
+                "fallback_reasons": fallback_reasons,
                 "ml_kill_switch": intelligence.kill_switch if intelligence is not None else False,
                 "evaluated_at": last_result.evaluated_at.isoformat()
                 if last_result is not None and last_result.evaluated_at
                 else None,
                 "forecast_count": len(last_result.forecasts) if last_result is not None else 0,
+                "needs_human_review_count": last_result.needs_human_review_count
+                if last_result is not None
+                else 0,
             },
             "decision_engine": {
                 "status": "ok" if decision is not None else "degraded",

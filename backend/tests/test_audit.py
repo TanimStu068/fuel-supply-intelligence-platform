@@ -150,11 +150,7 @@ class _FakeSession:
         if needle is None:
             return rows
         trail = TRAILS[cls._TRAILS[bucket]]
-        return [
-            row
-            for row in rows
-            if needle in _searchable_text(trail.to_entry(row)).lower()
-        ]
+        return [row for row in rows if needle in _searchable_text(trail.to_entry(row)).lower()]
 
     def queue(self, decisions: list[Any], events: list[Any], alerts: list[Any]) -> None:
         """Set the rows each of the three queries will return."""

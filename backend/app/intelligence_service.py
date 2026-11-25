@@ -130,6 +130,10 @@ class IntelligenceService:
         self._last_decisions: list[DispatchDecision] = []
         #: The most recent recommendations.
         self._last_recommendations: list[Any] = []
+        #: An injected fault that makes the whole evaluation raise, so the
+        #: decision layer's rule-based policy takes over. ``None`` is the
+        #: normal case.
+        self._evaluate_fault: str | None = None
 
     @property
     def engine(self) -> IntelligenceEngine:
@@ -201,7 +205,22 @@ class IntelligenceService:
         operator has politely switched it off — is to break it on
         purpose.
 
-        ``"predict_error"`` makes the model raise. ``None`` clears it.
+        Two faults, and the difference between them is the whole point:
+
+        ``"predict_error"``
+            The *model* raises. The selector catches it and answers with
+            the rule-based **predictor**. The intelligence layer still
+            produces forecasts and risks, so the **decision** layer keeps
+            using the model-driven policy.
+
+        ``"evaluate_error"``
+            The whole *evaluation* raises. The intelligence layer has
+            nothing to offer at all, so the **decision** layer's
+            rule-based **policy** takes over — the days-of-cover
+            fallback, with its lower confidence and its request for human
+            review.
+
+        ``None`` clears the fault.
 
         The difference from the kill-switch matters. The kill-switch is a
         *decision*: the model is fine and has been told not to be used.
@@ -209,12 +228,18 @@ class IntelligenceService:
         notice on its own. Both must end up in the same place — the
         rule-based predictor, with every forecast flagged for a human.
         """
-        state = self._engine.selector.learned.inject_fault(fault)
+        if fault == "evaluate_error":
+            self._engine.selector.learned.inject_fault(None)
+            self._evaluate_fault = "evaluate_error"
+        else:
+            self._engine.selector.learned.inject_fault(fault)
+            self._evaluate_fault = None
+
         # The previous result was produced by a model that no longer
         # exists, so it is dropped: the next evaluation has to see the
         # failure for itself.
         self._last_result = None
-        return state
+        return fault
 
     async def evaluate_and_store(self) -> IntelligenceResult | None:
         """Run the engine over the cached state and persist the results."""
@@ -223,6 +248,16 @@ class IntelligenceService:
             return None
 
         try:
+            if self._evaluate_fault == "evaluate_error":
+                # The injected fault breaks the whole evaluation, the way
+                # a real outage in the intelligence layer would. The
+                # exception handler below turns it into the decision
+                # layer's rule-based policy.
+                raise RuntimeError(
+                    "the intelligence layer failed to evaluate the network: "
+                    "an injected evaluation fault"
+                )
+
             history = await self._load_history()
             regions = {region.id: region.demand_factor for region in state.regions}
 

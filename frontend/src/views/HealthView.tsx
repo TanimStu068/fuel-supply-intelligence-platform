@@ -10,6 +10,30 @@ import { percent, simTime } from '../format'
 import type { ServiceHealth } from '../types'
 import { EmptyState, Metric, Panel, StatusPill } from '../components/ui'
 
+/**
+ * The reason the platform gave for using the rule-based predictor.
+ *
+ * The reasons are the platform's own words — `model_error`,
+ * `not_trained`, `insufficient_history`, `worse_than_baseline` — and an
+ * operator reading them should not have to look them up.
+ */
+const FALLBACK_REASONS: Record<string, string> = {
+  model_error: 'the model raised on every forecast',
+  not_trained: 'the model is not trained yet',
+  insufficient_history: 'there is not enough history to trust the model',
+  worse_than_baseline: 'the model is worse than the rule-based baseline',
+}
+
+function fallbackReason(reasons: Record<string, number>): string | null {
+  const entries = Object.entries(reasons ?? {}).filter(([, count]) => count > 0)
+  if (entries.length === 0) {
+    return null
+  }
+  const [reason, count] = entries.sort((a, b) => b[1] - a[1])[0]
+  const label = FALLBACK_REASONS[reason] ?? reason
+  return count > 1 ? `${label} (${count} times)` : label
+}
+
 export function HealthView({ health }: { health: ServiceHealth | null }) {
   if (!health) {
     return (
@@ -122,6 +146,15 @@ export function HealthView({ health }: { health: ServiceHealth | null }) {
                 <td className="muted">
                   model {prediction.active_model} · {prediction.forecast_count} forecasts ·
                   evaluated {simTime(prediction.evaluated_at)}
+                  {prediction.fallback_active ? (
+                    <>
+                      {' · '}
+                      <strong>
+                        {fallbackReason(prediction.fallback_reasons) ??
+                          'the rule-based predictor is answering'}
+                      </strong>
+                    </>
+                  ) : null}
                 </td>
               </tr>
               <tr>

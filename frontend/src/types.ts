@@ -372,8 +372,14 @@ export interface ServiceHealth {
     prediction_service: {
       status: string
       active_model: string
+      /** True when the rule-based predictor is answering instead of the model. */
+      fallback_active: boolean
+      /** The fallback activations, by reason. */
+      fallback_reasons: Record<string, number>
+      ml_kill_switch: boolean
       evaluated_at: string | null
       forecast_count: number
+      needs_human_review_count: number
     }
     decision_engine: {
       status: string

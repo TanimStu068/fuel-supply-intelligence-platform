@@ -25,3 +25,9 @@ frontend/.playwright/
 # Profiling dumps. ``py-spy dump`` writes these; they are large, they are
 # regenerable, and they say nothing a reader needs from the repository.
 .tmp-pyspy/
+
+# Coverage artifacts
+coverage.json
+.coverage
+backend/coverage.json
+htmlcov/

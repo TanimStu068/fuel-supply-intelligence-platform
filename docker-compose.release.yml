@@ -1,0 +1,25 @@
+# The release overlay.
+#
+# The base file builds the backend and the frontend from source, which is
+# what a developer wants and what CI wants. A *deployment* wants the opposite:
+# the published image, built once, tested once, and rolled back by pointing
+# at a different tag.
+#
+# This overlay replaces the two `build:` blocks with `image:` blocks. It
+# changes nothing else — the same profiles, the same limits, the same
+# health checks.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.release.yml up -d --wait
+#
+# The image tags come from the environment, so a rollback is a change to
+# `.env` and a `--no-build` redeploy. See docs/deployment.md.
+
+services:
+  backend:
+    # `build` is removed here; the `image` key replaces it.
+    build: !reset null
+    image: ${BACKEND_IMAGE:-ghcr.io/tanimstu068/fuel-backend:latest}
+
+  frontend:
+    build: !reset null
+    image: ${FRONTEND_IMAGE:-ghcr.io/tanimstu068/fuel-frontend:latest}
