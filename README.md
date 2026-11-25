@@ -13,6 +13,26 @@ Built for the BUP CSE Fest 2026 Hackathon Finals · in association with Poridhi.
 
 </div>
 
+---
+
+Table of contents
+
+1. [What this project is](#1-what-this-project-is)
+2. [Screenshots](#2-screenshots)
+3. [Architecture](#3-architecture)
+4. [The operating loop](#4-the-operating-loop)
+5. [Tech stack](#5-tech-stack)
+6. [Repository layout](#6-repository-layout)
+7. [Quick start](#7-quick-start)
+8. [Configuration](#8-configuration)
+9. [Simulator integration](#9-simulator-integration)
+10. [Testing and CI](#10-testing-and-ci)
+11. [7-day build plan](#11-7-day-build-plan)
+12. [Required deliverables map](#12-required-deliverables-map)
+13. [Reference material](#13-reference-material)
+14. [Rules we hold ourselves to](#14-rules-we-hold-ourselves-to)
+
+---
 
 ## 1. What this project is
 
