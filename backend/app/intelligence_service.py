@@ -21,7 +21,8 @@ import json
 import logging
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import Float, func, select
+from sqlalchemy.dialects.postgresql import JSONB
 
 from .config import get_settings
 from .db import Database
@@ -863,15 +864,58 @@ class IntelligenceService:
             if not forecasts:
                 return 0
 
+            # The forecast's points are read **in the database**, not in
+            # Python. Each forecast stores its whole horizon as JSON —
+            # ninety-six points, about fifteen kilobytes — and the window
+            # holds several hundred forecasts, so decoding them in Python
+            # meant decoding megabytes of JSON on every sync cycle. The
+            # instrumentation measured it at **0.23 s**, two thirds of the
+            # cycle, spent decoding JSON that was then thrown away: every
+            # forecast in the window had already been scored.
+            #
+            # Postgres is better at this than Python is. It expands the
+            # JSON array server-side and hands back only the columns the
+            # scoring needs, so the payload never crosses into the
+            # application at all.
+            point_rows = await session.execute(
+                select(
+                    DemandForecast.station_id,
+                    DemandForecast.fuel_type,
+                    DemandForecast.sim_tick,
+                    DemandForecast.model,
+                    func.jsonb_array_elements(DemandForecast.payload.cast(JSONB))
+                    .op("->>")("tick")
+                    .label("target_tick"),
+                    func.jsonb_array_elements(DemandForecast.payload.cast(JSONB))
+                    .op("->>")("predicted_demand")
+                    .cast(Float)
+                    .label("predicted_demand"),
+                    func.jsonb_array_elements(DemandForecast.payload.cast(JSONB))
+                    .op("->>")("lower_bound")
+                    .cast(Float)
+                    .label("lower_bound"),
+                    func.jsonb_array_elements(DemandForecast.payload.cast(JSONB))
+                    .op("->>")("upper_bound")
+                    .cast(Float)
+                    .label("upper_bound"),
+                ).where(
+                    DemandForecast.sim_tick >= window_start,
+                    DemandForecast.sim_tick < current_tick,
+                )
+            )
+
+            expanded_rows = point_rows.all()
+
             # The ticks this cycle could score. Only these are looked up
             # in ``prediction_evaluations`` — asking for "every evaluation
             # from the window onwards" reads the whole table into
             # Python, because the table holds one row per station, per
             # fuel, per tick and grows without bound. That read was
             # enough to push the container past its memory limit.
-            candidate_ticks = {
-                point["tick"] for forecast in forecasts for point in _forecast_points(forecast)
-            }
+            candidate_ticks = {int(row.target_tick) for row in expanded_rows}
+
+            if not candidate_ticks:
+                return 0
 
             already_scored: set[tuple[str, str, int]] = set()
             if candidate_ticks:
@@ -905,34 +949,37 @@ class IntelligenceService:
             # the target tick**, because that is the one an operator
             # would have acted on. Taking an arbitrary row would make
             # the reported error depend on row order.
-            best: dict[tuple[str, str, int], DemandForecast] = {}
-            for forecast in forecasts:
-                for point in _forecast_points(forecast):
-                    key = (forecast.station_id, forecast.fuel_type, point["tick"])
-                    if key in already_scored or key not in actuals:
-                        continue
-                    current = best.get(key)
-                    if current is None or forecast.sim_tick > current.sim_tick:
-                        best[key] = forecast
+            #
+            # The point's own numbers come back with the row, so the
+            # forecast's JSON payload never has to be decoded in Python.
+            best: dict[tuple[str, str, int], tuple[int, str, float, float, float]] = {}
+            for row in expanded_rows:
+                key = (row.station_id, row.fuel_type, int(row.target_tick))
+                if key in already_scored or key not in actuals:
+                    continue
+                current = best.get(key)
+                if current is None or row.sim_tick > current[0]:
+                    best[key] = (
+                        row.sim_tick,
+                        row.model,
+                        float(row.predicted_demand),
+                        float(row.lower_bound),
+                        float(row.upper_bound),
+                    )
 
             scored = 0
-            for (station_id, fuel_type, target_tick), forecast in best.items():
-                point = next(
-                    (point for point in _forecast_points(forecast) if point["tick"] == target_tick),
-                    None,
-                )
-                if point is None:
-                    continue
+            for (station_id, fuel_type, target_tick), scored_row in best.items():
+                _, model, predicted_demand, lower_bound, upper_bound = scored_row
                 await write_prediction_evaluation(
                     session,
                     station_id=station_id,
                     fuel_type=fuel_type,
                     target_tick=target_tick,
-                    model=forecast.model,
-                    predicted_demand=point["predicted_demand"],
+                    model=model,
+                    predicted_demand=predicted_demand,
                     actual_demand=actuals[(station_id, fuel_type, target_tick)],
-                    lower_bound=point["lower_bound"],
-                    upper_bound=point["upper_bound"],
+                    lower_bound=lower_bound,
+                    upper_bound=upper_bound,
                 )
                 scored += 1
 
@@ -960,6 +1007,27 @@ class IntelligenceService:
         that already has the data, and the database does it in constant
         memory. The numbers are identical; the latency is not.
 
+        The aggregate is also **bounded to a recent window**. Moving the
+        arithmetic into SQL stopped the event loop from stalling, but it
+        left the query itself scanning the whole table: at half a million
+        rows a parallel sequential scan took **190 ms**, and the sync
+        cycle runs every three seconds, so the aggregate was still the
+        single largest item in the cycle. A metric does not need the
+        whole history to be useful — it needs the recent past — so the
+        query is limited to the rows scored in the last
+        ``error_metric_window_ticks`` ticks.
+
+        The window is measured in **ticks**, not seconds, because that is
+        what the rows are keyed by: ``prediction_evaluations`` is one row
+        per station, per fuel, per target tick, and ``target_tick`` is
+        indexed. Bounding on ``created_at`` would not work — the rows are
+        upserted, so a re-scored forecast keeps its original timestamp
+        and the window would drift away from the data it describes.
+
+        The window is a *window*, not a cap: the metric describes the
+        model's recent behaviour, and a row from last week says nothing
+        about how the model behaves now.
+
         The old way of doing it is still here, behind
         ``PREDICTION_ERROR_AGGREGATE_IN_DATABASE=false``, because the
         before-and-after numbers in ``docs/load-test-report.md`` have to
@@ -972,14 +1040,22 @@ class IntelligenceService:
 
         from sqlalchemy import Integer, func
 
-        result = await session.execute(
-            select(
-                PredictionEvaluation.model,
-                func.avg(PredictionEvaluation.absolute_error),
-                func.count(PredictionEvaluation.id),
-                func.sum(func.cast(PredictionEvaluation.within_interval, Integer)),
-            ).group_by(PredictionEvaluation.model)
+        query = select(
+            PredictionEvaluation.model,
+            func.avg(PredictionEvaluation.absolute_error),
+            func.count(PredictionEvaluation.id),
+            func.sum(func.cast(PredictionEvaluation.within_interval, Integer)),
         )
+
+        # A window of zero means "the whole table" — which is the
+        # unbounded behaviour the load test found, and which
+        # ``ERROR_METRIC_WINDOW_TICKS=0`` reproduces on demand.
+        window_ticks = self._settings.error_metric_window_ticks
+        if window_ticks > 0:
+            latest = select(func.max(PredictionEvaluation.target_tick)).scalar_subquery()
+            query = query.where(PredictionEvaluation.target_tick >= latest - window_ticks)
+
+        result = await session.execute(query.group_by(PredictionEvaluation.model))
         rows = result.all()
         if not rows:
             return

@@ -195,6 +195,24 @@ class Settings(BaseSettings):
         default=True,
         alias="PREDICTION_ERROR_AGGREGATE_IN_DATABASE",
     )
+    #: How far back the prediction-error metric looks, in simulator ticks.
+    #:
+    #: The aggregate is run on every sync cycle — every three seconds — and
+    #: ``prediction_evaluations`` holds one row per station, per fuel, per
+    #: tick, so it grows without bound. Scanning all of it took 190 ms of
+    #: the cycle's 320 ms. Bounding the query to the recent past turns
+    #: that scan into a bounded index scan.
+    #:
+    #: The window is in ticks because that is what the rows are keyed by.
+    #: The default of five hundred ticks is long enough to describe how
+    #: the model has been behaving, and short enough that the query never
+    #: grows. Set it to zero to aggregate the whole table — which is what
+    #: the "before" side of the load-test comparison does.
+    error_metric_window_ticks: int = Field(
+        default=500,
+        alias="ERROR_METRIC_WINDOW_TICKS",
+        ge=0,
+    )
     #: Whether the platform dispatches fuel in response to risk.
     dispatch_enabled: bool = Field(default=True, alias="DISPATCH_ENABLED")
 
