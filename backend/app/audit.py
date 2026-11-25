@@ -49,11 +49,38 @@ from typing import Any
 from sqlalchemy import cast, func, or_, select
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql.util import ClauseAdapter
 
 from .models import Alert, DomainEventRow, Recommendation
 
 #: The largest page the endpoint will serve.
 MAX_LIMIT = 1000
+
+#: The smallest number of rows a full-text scan will look at before it
+#: gives up. A search that matches nothing must not walk the whole
+#: trail, and a needle that matches everything must not fetch the whole
+#: trail either.
+MIN_SCAN_WINDOW_ROWS = 5000
+
+#: How many times the page size the scan window is allowed to be.
+#:
+#: The window is the newest slice of a trail that a full-text search
+#: looks at. It has to be comfortably larger than the page the operator
+#: asked for, because the filter is applied *after* the slice is taken:
+#: a window of exactly the page size would return fewer rows than the
+#: page asked for whenever the newest rows do not all match.
+SCAN_WINDOW_PAGE_FACTOR = 20
+
+
+def scan_window(limit: int) -> int:
+    """How many rows a full-text search looks at.
+
+    One definition, used by the page **and** the summary, so the two
+    always describe the same set of rows. If they used different windows
+    the summary could count rows the page never showed, and the count
+    would be a number the operator cannot reproduce from the answer.
+    """
+    return max(limit * SCAN_WINDOW_PAGE_FACTOR, MIN_SCAN_WINDOW_ROWS)
 
 
 @dataclass(slots=True)
@@ -313,6 +340,27 @@ TRAILS: dict[str, _Trail] = {
 }
 
 
+def _adapt(clause: Any, source: Any) -> Any:
+    """Rewrite a clause so it reads from ``source`` instead of the table.
+
+    ``source`` is the bounded subquery that the full-text scan selects
+    from. Every clause has to be rewritten against it, because a clause
+    that still points at the table would join the two back together and
+    the whole table would be read again — which is the bug the subquery
+    exists to fix.
+
+    :class:`ClauseAdapter` is SQLAlchemy's own mechanism for this, and
+    it is used here rather than a hand-written column lookup because not
+    every clause is a column. The events trail's entity filter is an
+    expression that reaches into a JSON document
+    (``parameters->>'entity_id'``), and an expression has no column name
+    to look up — the hand-written version raised ``KeyError: None`` and
+    turned every full-text search that also filtered by entity into a
+    500.
+    """
+    return ClauseAdapter(source).traverse(clause)
+
+
 def _clauses(
     trail: _Trail,
     *,
@@ -322,6 +370,7 @@ def _clauses(
     text: str | None,
     since: datetime | None,
     until: datetime | None,
+    source: Any | None = None,
 ) -> list[Any]:
     """The WHERE clauses for one trail.
 
@@ -330,6 +379,28 @@ def _clauses(
     match. The same filters are applied again in Python after the merge —
     see :func:`read_audit_entries` — because ``status`` means a decision's
     outcome in one trail and an alert's severity in another.
+
+    ``source`` overrides which table the columns are read from. It is the
+    bounded subquery in the full-text search: without it the clause
+    would still point at the table, and the query would join the two
+    back together and read every row anyway.
+
+    The remapping goes through SQLAlchemy's own :class:`ClauseAdapter`
+    rather than a hand-written ``column.key`` lookup. The adapter
+    rewrites *any* clause against the new FROM — including the ones
+    that are not simple columns. The events trail's entity filter is
+    not a column at all: it reaches into the JSON document
+    (``parameters->>'entity_id'``), and a name-based lookup cannot
+    express that. It failed with ``KeyError: None`` and turned every
+    full-text search that also filtered by entity into a 500.
+
+    **Each filter is built as a whole clause and then adapted**, rather
+    than adapting each column and assembling the clause afterwards. It
+    matters: a clause that still mentions the table is not merely
+    untidy — SQLAlchemy adds the table to the FROM to satisfy it, and
+    the query becomes a cartesian product between the window and the
+    whole table. That is not a slow query, it is a wrong one: the
+    decision trail's count took **147 seconds** that way.
     """
     clauses: list[Any] = []
     if kinds:
@@ -348,7 +419,163 @@ def _clauses(
         clauses.append(trail.time_column >= since)
     if until is not None:
         clauses.append(trail.time_column <= until)
-    return clauses
+
+    if source is None:
+        return clauses
+    return [_adapt(clause, source) for clause in clauses]
+
+
+async def _search_by_scan(
+    session: AsyncSession,
+    trail: _Trail,
+    *,
+    kinds: list[str] | None,
+    statuses: list[str] | None,
+    entity_id: str | None,
+    text: str | None,
+    since: datetime | None,
+    until: datetime | None,
+    limit: int,
+) -> list[Any]:
+    """Find the rows matching a full-text search by walking the newest ones.
+
+    **Why not let the index do it.** A trigram index finds the rows that
+    contain the needle quickly, but it then has to *fetch* every one of
+    them. The audit trail's needle is often common — "disrupted" appears
+    in the alternatives of every recommendation the platform made — so
+    the index returned all 61,951 rows and the heap scan fetched all
+    61,951 of them, to sort them by time and keep two hundred. That was
+    **2,319 ms**.
+
+    The rows the operator wants are the **newest** ones, so the search
+    takes the newest rows first and filters them afterwards. The same
+    query under this plan took **13 ms** — a hundred and seventy-eight
+    times less work, because it never touches the rows that would have
+    been discarded.
+
+    The shape matters twice over:
+
+    * the filter is applied in an **outer** query over a bounded
+      **inner** query, because written as one statement the planner
+      prefers the trigram index and fetches every match anyway; and
+    * the filter's columns point at the **inner** query, because if they
+      point at the table the two are joined back together and the whole
+      table is read again — which is the bug this shape exists to fix.
+
+    The walk is bounded: it gives up after ``SCAN_WINDOW_ROWS`` rows, so
+    a needle that matches nothing in the newest rows costs one bounded
+    scan rather than a full one.
+    """
+    recent, clauses = _scan_window(
+        trail,
+        kinds=kinds,
+        statuses=statuses,
+        entity_id=entity_id,
+        text=text,
+        since=since,
+        until=until,
+        limit=limit,
+    )
+    query = (
+        select(*(column for column in recent.c))
+        .where(*clauses)
+        .order_by(recent.c[trail.time_column.key].desc())
+        .limit(limit)
+    )
+    return list((await session.execute(query)).all())
+
+
+async def _count_by_scan(
+    session: AsyncSession,
+    trail: _Trail,
+    *,
+    kinds: list[str] | None,
+    statuses: list[str] | None,
+    entity_id: str | None,
+    text: str | None,
+    since: datetime | None,
+    until: datetime | None,
+    limit: int,
+) -> list[Any]:
+    """Count the matches of a full-text search, over the same window.
+
+    This is the summary's half of the windowed search, and it exists
+    because the summary used to count the **whole table** while the
+    page showed the newest slice. Two things were wrong with that.
+
+    The count was **inconsistent**: the summary described a different
+    set of rows than the page returned, so the total could not be
+    reproduced from the answer. And the count was **the slow part**: the
+    decision trail's ``inputs_snapshot`` is a 2.4 KB JSON document per
+    row, so reading all 61,951 of them to find the matches took
+    **2,171 ms** — while the windowed page took **28 ms**.
+
+    The window is the same one the page uses, so the two agree by
+    construction rather than by coincidence.
+    """
+    recent, clauses = _scan_window(
+        trail,
+        kinds=kinds,
+        statuses=statuses,
+        entity_id=entity_id,
+        text=text,
+        since=since,
+        until=until,
+        limit=limit,
+    )
+    kind_column = recent.c[trail.kind_column.key]
+    status_column = recent.c[trail.status_column.key]
+    time_column = recent.c[trail.time_column.key]
+    query = (
+        select(
+            kind_column,
+            status_column,
+            func.count(),
+            func.min(time_column),
+            func.max(time_column),
+        )
+        .select_from(recent)
+        .where(*clauses)
+        .group_by(kind_column, status_column)
+    )
+    return list((await session.execute(query)).all())
+
+
+def _scan_window(
+    trail: _Trail,
+    *,
+    kinds: list[str] | None,
+    statuses: list[str] | None,
+    entity_id: str | None,
+    text: str | None,
+    since: datetime | None,
+    until: datetime | None,
+    limit: int,
+) -> tuple[Any, list[Any]]:
+    """The bounded window of rows a full-text search looks at.
+
+    Returns the subquery and the clauses that filter it. The page and
+    the count both build it here, so they cannot drift apart.
+    """
+    window = scan_window(limit)
+    recent = (
+        select(*trail.page_columns)
+        .select_from(trail.table)
+        .order_by(trail.time_column.desc())
+        .limit(window)
+        .subquery()
+    )
+    clauses = _clauses(
+        trail,
+        kinds=kinds,
+        statuses=statuses,
+        entity_id=entity_id,
+        text=text,
+        since=since,
+        until=until,
+        source=recent,
+    )
+    return recent, clauses
 
 
 async def read_audit_entries(
@@ -400,7 +627,22 @@ async def read_audit_entries(
             .order_by(trail.time_column.desc())
             .limit(limit)
         )
-        rows = (await session.execute(query)).all()
+        if text:
+            # A full-text search is scanned over the newest rows rather
+            # than matched with an index. See ``_search_by_scan``.
+            rows = await _search_by_scan(
+                session,
+                trail,
+                kinds=kinds,
+                statuses=statuses,
+                entity_id=entity_id,
+                text=text,
+                since=since,
+                until=until,
+                limit=limit,
+            )
+        else:
+            rows = (await session.execute(query)).all()
         entries.extend(trail.to_entry(row) for row in rows)
 
     # The entity filter applies to every source, so it is applied after
@@ -476,6 +718,7 @@ async def summarise_audit_entries(
     text: str | None = None,
     since: datetime | None = None,
     until: datetime | None = None,
+    limit: int = 200,
 ) -> dict[str, Any]:
     """Summarise a search: how many, and broken down by facet.
 
@@ -487,6 +730,24 @@ async def summarise_audit_entries(
     ``COUNT`` is grouped by kind and status, and the oldest and newest
     moments are the minimum and maximum over those groups — so the
     whole summary is three aggregate queries.
+
+    **A full-text search counts the same window the page shows.**
+    This is the part that was wrong. The count query was left on the
+    unbounded whole-table shape while the page moved to a bounded
+    window, so the two described different sets of rows — and the
+    unbounded count was also the endpoint's dominant cost: the
+    decision trail's ``inputs_snapshot`` is a 2.4 KB JSON document per
+    row, so scanning all 61,951 of them to count the matches took
+    **2,171 ms**, while the windowed page took **28 ms**.
+
+    The window is now the contract for both. The summary says so
+    explicitly in its ``scope`` field, because a count of "3" that
+    means "3 in the newest 5,000" must not be read as "3 in the whole
+    trail" — that is the difference between a measurement and a claim.
+
+    A search **without** a needle still counts the whole table. "How
+    many critical alerts are there" genuinely means all of them, and
+    that count is cheap: the facet columns are narrow and indexed.
     """
     wanted = set(sources) if sources else set(TRAILS)
 
@@ -496,33 +757,49 @@ async def summarise_audit_entries(
     total = 0
     oldest: datetime | None = None
     newest: datetime | None = None
+    window = scan_window(limit)
 
     for source in wanted:
         trail = TRAILS.get(source)
         if trail is None:
             continue
-        clauses = _clauses(
-            trail,
-            kinds=kinds,
-            statuses=statuses,
-            entity_id=entity_id,
-            text=text,
-            since=since,
-            until=until,
-        )
-        query = (
-            select(
-                trail.kind_column,
-                trail.status_column,
-                func.count(),
-                func.min(trail.time_column),
-                func.max(trail.time_column),
+        if text:
+            # The count has to look at the same rows the page looks at,
+            # or the summary and the page describe different sets.
+            rows = await _count_by_scan(
+                session,
+                trail,
+                kinds=kinds,
+                statuses=statuses,
+                entity_id=entity_id,
+                text=text,
+                since=since,
+                until=until,
+                limit=limit,
             )
-            .select_from(trail.table)
-            .where(*clauses)
-            .group_by(trail.kind_column, trail.status_column)
-        )
-        rows = (await session.execute(query)).all()
+        else:
+            clauses = _clauses(
+                trail,
+                kinds=kinds,
+                statuses=statuses,
+                entity_id=entity_id,
+                text=text,
+                since=since,
+                until=until,
+            )
+            query = (
+                select(
+                    trail.kind_column,
+                    trail.status_column,
+                    func.count(),
+                    func.min(trail.time_column),
+                    func.max(trail.time_column),
+                )
+                .select_from(trail.table)
+                .where(*clauses)
+                .group_by(trail.kind_column, trail.status_column)
+            )
+            rows = (await session.execute(query)).all()
         if not rows:
             continue
         trail_total = 0
@@ -544,6 +821,12 @@ async def summarise_audit_entries(
         "by_status": dict(sorted(by_status.items())),
         "newest": newest.isoformat() if newest else None,
         "oldest": oldest.isoformat() if oldest else None,
+        # What the count covers. Without this the count is a number the
+        # operator cannot interpret: the same field means "the whole
+        # trail" for a facet query and "the newest N rows" for a
+        # full-text search.
+        "scope": "window" if text else "table",
+        "window_rows": window if text else None,
     }
 
 

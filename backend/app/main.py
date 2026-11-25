@@ -43,7 +43,7 @@ from .intelligence.forecasting import ForecastSelector, ForecastSelectorConfig
 from .intelligence.risk import RiskLevel
 from .intelligence_service import IntelligenceService
 from .logging_config import configure_logging
-from .metrics import install_metrics_middleware
+from .metrics import install_metrics_middleware, publish_container_memory_periodically
 from .simulator_client import SimulatorClient, build_client
 from .simulator_errors import (
     SimulatorAPIError,
@@ -114,6 +114,16 @@ async def lifespan(app: FastAPI):
 
     await app.state.database.connect()
 
+    # The container's own memory numbers are published on a timer, not on
+    # every request. Reading the cgroup files per request cost the request
+    # path 4% of the container's CPU for a number that does not change
+    # between two requests a millisecond apart.
+    memory_stop = asyncio.Event()
+    memory_task = asyncio.create_task(
+        publish_container_memory_periodically(stop=memory_stop),
+        name="container-memory-publisher",
+    )
+
     try:
         if settings.sync_enabled:
             await app.state.sync.start()
@@ -135,6 +145,8 @@ async def lifespan(app: FastAPI):
         # Docker escalate to SIGKILL.
         app.state.shutting_down = True
         logger.info("backend is shutting down; draining")
+        memory_stop.set()
+        memory_task.cancel()
         await app.state.sync.stop()
         try:
             await asyncio.wait_for(
@@ -1094,6 +1106,13 @@ async def search_audit(
     The response carries the entries **and** a summary, so a search can be
     read at a glance ("312 alerts, 47 of them critical") before drilling
     into individual rows.
+
+    The summary says what it covers. A facet query ("how many critical
+    alerts") counts the **whole table**, and its ``scope`` is
+    ``"table"``. A full-text search (``?q=...``) counts the **newest
+    slice** the search looked at, and its ``scope`` is ``"window"`` with
+    the size in ``window_rows`` — the same slice the page returned, so
+    the total and the entries always describe the same rows.
     """
     from .audit import read_audit_entries, summarise_audit_entries
 
@@ -1124,6 +1143,7 @@ async def search_audit(
                 text=q,
                 since=since,
                 until=until,
+                limit=limit,
             )
             entries = await read_audit_entries(
                 session,

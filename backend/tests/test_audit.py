@@ -16,7 +16,13 @@ from typing import Any, ClassVar
 
 import pytest
 
-from app.audit import TRAILS, read_audit_entries, summarise_audit_entries
+from app.audit import (
+    TRAILS,
+    _searchable_text,
+    read_audit_entries,
+    scan_window,
+    summarise_audit_entries,
+)
 from app.models import Alert, DomainEventRow, Recommendation
 
 
@@ -72,14 +78,33 @@ class _FakeSession:
     async def execute(self, query: Any) -> _FakeResult:
         """Return the rows for the table the query names."""
         text = str(query)
+        needle = self._needle(query)
         for table, bucket in self._TABLES.items():
             if table not in text:
                 continue
-            rows = self._rows[bucket]
+            rows = self._matching(bucket, self._rows[bucket], needle)
             if "count" in text.lower():
                 return _FakeResult(self._aggregate(bucket, rows))
             return _FakeResult(rows)
         return _FakeResult([])
+
+    @staticmethod
+    def _needle(query: Any) -> str | None:
+        """The full-text needle the query carries, if it has one.
+
+        The fake has to honour the needle, or a summary that counts the
+        whole trail would look identical to a summary that counts only
+        the matches — and the test would pass without proving anything
+        about the scope.
+        """
+        try:
+            params = query.compile().params
+        except Exception:  # pragma: no cover - a query the fake cannot read
+            return None
+        for value in params.values():
+            if isinstance(value, str) and value.startswith("%") and value.endswith("%"):
+                return value[1:-1].lower()
+        return None
 
     @classmethod
     def _aggregate(cls, bucket: str, rows: list[Any]) -> list[tuple[Any, ...]]:
@@ -108,6 +133,28 @@ class _FakeSession:
                 )
             )
         return aggregated
+
+    @classmethod
+    def _matching(
+        cls,
+        bucket: str,
+        rows: list[Any],
+        needle: str | None,
+    ) -> list[Any]:
+        """The rows a full-text search would match.
+
+        The same text the module searches — the entry's kind, status,
+        entity, message and payload — so the fake counts the rows the
+        real query would count.
+        """
+        if needle is None:
+            return rows
+        trail = TRAILS[cls._TRAILS[bucket]]
+        return [
+            row
+            for row in rows
+            if needle in _searchable_text(trail.to_entry(row)).lower()
+        ]
 
     def queue(self, decisions: list[Any], events: list[Any], alerts: list[Any]) -> None:
         """Set the rows each of the three queries will return."""
@@ -272,6 +319,74 @@ async def test_a_full_text_search_finds_the_rationale(rows) -> None:
     assert len(entries) == 1
     assert entries[0].status == "rejected"
     assert "disrupted" in entries[0].message
+
+
+async def test_a_full_text_search_can_be_combined_with_an_entity_filter(
+    rows,
+) -> None:
+    """A full-text search and an entity filter must compose.
+
+    **This combination used to be a 500.** The full-text search reads
+    from a bounded subquery, and every clause had to be rewritten
+    against it. The rewrite looked each column up by name — but the
+    events trail's entity filter is not a column, it is an expression
+    that reaches into the JSON document
+    (``parameters->>'entity_id'``), and an expression has no name to
+    look up. It raised ``KeyError: None`` while the query was being
+    built, so *any* search that combined a needle with an entity id
+    answered 500 instead of an answer.
+
+    The two filters are also the two an operator is most likely to
+    combine — "everything about this station that mentions the route" —
+    so the combination is not an edge case.
+    """
+    session = _FakeSession()
+    entries = await _read(session, rows, text="disrupted", entity_id="station-karnaphuli")
+
+    assert len(entries) == 1
+    assert entries[0].entity_id == "station-karnaphuli"
+    assert "disrupted" in entries[0].message
+
+
+async def test_the_search_window_is_the_same_for_the_page_and_the_count(
+    rows,
+) -> None:
+    """The summary and the page must describe the same set of rows.
+
+    The count query used to read the **whole table** while the page
+    read the newest slice, so the two described different sets: the
+    summary could report thousands of rows for a page that returned a
+    handful, and the total could not be reproduced from the answer.
+
+    The count is now taken over the same window, and the summary says so
+    in its ``scope``, because a count of "3" that means "3 in the newest
+    5,000" must not be read as "3 in the whole trail".
+    """
+    session = _FakeSession()
+    session.queue(rows["decisions"], rows["events"], rows["alerts"])
+    summary = await summarise_audit_entries(session, text="disrupted", limit=200)
+
+    assert summary["scope"] == "window"
+    assert summary["window_rows"] == scan_window(200)
+    # One decision's rationale mentions the route being disrupted.
+    assert summary["count"] == 1
+    assert summary["by_source"] == {"decision": 1}
+
+
+async def test_a_facet_query_counts_the_whole_table(rows) -> None:
+    """Without a needle, the count is the whole table.
+
+    "How many critical alerts are there" genuinely means all of them,
+    and that count is cheap — the facet columns are narrow and indexed.
+    Saying so in the summary keeps the two kinds of count honest.
+    """
+    session = _FakeSession()
+    session.queue(rows["decisions"], rows["events"], rows["alerts"])
+    summary = await summarise_audit_entries(session, statuses=["critical"])
+
+    assert summary["scope"] == "table"
+    assert summary["window_rows"] is None
+    assert summary["count"] == 4
 
 
 async def test_a_kind_filter_works(rows) -> None:

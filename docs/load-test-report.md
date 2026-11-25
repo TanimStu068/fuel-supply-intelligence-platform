@@ -419,3 +419,275 @@ The broad live audit request used during this part did not return within 10 s.
 Per the operating rule, the stack was stopped; the example filters and CLI
 filter behavior are documented, but the live audit API result still needs
 verification after the endpoint's response-time issue is resolved.
+
+**Resolved later the same day.** The audit endpoint turned out to have two
+real bugs, and both are now fixed and measured — see
+[the Part 3 section of `docs/progress/day6.md`](progress/day6.md#part-3--load-testing-searchable-logs-and-grafana-evidence).
+
+* **A 500 on `?q=…&entity_id=…`.** The full-text search reads from a
+  bounded subquery, and every clause has to be rewritten against it. The
+  rewrite looked each column up by name, but the events trail's entity
+  filter is an expression (`parameters->>'entity_id'`), not a column, so it
+  raised `KeyError: None` while the query was being built. It is now
+  rewritten with SQLAlchemy's `ClauseAdapter`, on whole clauses — a clause
+  that still mentions the table makes SQLAlchemy add the table to the
+  `FROM`, which turns the query into a cartesian product.
+* **The summary count was the slow part, not the page.** The page had
+  already moved to a bounded window; the count had not. The decision
+  trail's `inputs_snapshot` is a 2.4 KB JSON document per row — 63 MB
+  across 61,951 rows — so counting the matches meant reading all of it:
+  **2,171 ms**. The count now uses the same window as the page, and the
+  summary reports its `scope` so a count always says which rows it covers.
+
+The endpoint now answers every query shape in under 0.7 s, against 152,129
+audit rows.
+
+---
+
+## Part 3 bounded asyncio/httpx run — 2026-11-25T06:32:48.666342+00:00
+
+**Environment:** host-side Python `asyncio`/`httpx`; core profile only; monitoring off; `docker stats` sampled every 2 s.
+**Stages:** 5 → 20 → 50 virtual users, 30 s per stage (90 s maximum per scenario). **Safety stops:** >90% of backend CPU quota for three consecutive samples, >20% request errors, or available host memory below 1 GiB before a scenario.
+
+| Scenario | Users | Requests | Avg | p50 | p95 | p99 | Throughput | Errors | CPU peak / quota | Memory peak |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| dashboard | 5 | 5354 | 8.47 ms | 6.12 ms | 16.29 ms | 49.71 ms | 589.54 req/s | 0.00% | 100.5% | 90.8 MiB |
+
+### Measurements and scenario limits
+
+- **Dashboard API:** Sequential reads across the ten operator-dashboard endpoints.
+  Pre-scenario available memory: 3111 MiB; elapsed: 9.1 s.
+  Stopped: backend CPU stayed above 90% of its 1.00-core limit.
+  `docker stats` peak: CPU 100.5% of quota, memory 90.8 MiB.
+
+**Observed system limit:**
+
+- dashboard: backend CPU stayed above 90% of its 1.00-core limit
+
+**Not run:** recommendation, decision were not started because the safety guard stops the scenario sequence after a configured limit is reached.
+
+### One bottleneck fix, measured before and after
+
+The prediction-error aggregate previously loaded the full `prediction_evaluations` table into Python on each evaluation. Moving the aggregation into SQL reduced dashboard-path p99 from **30,029.78 ms to 286.13 ms**, raised throughput from **41.75 to 335.39 req/s**, and cut the observed backend memory peak from **670 MB to 102 MB**. The aggregate query is:
+
+```sql
+SELECT model, AVG(absolute_error), COUNT(id),
+       SUM(CAST(within_interval AS INTEGER))
+FROM prediction_evaluations GROUP BY model
+```
+
+Raw measurements: `scripts/loadtest/results/part3-async.json`.
+
+---
+
+## Part 3 bounded asyncio/httpx run — 2026-11-25T06:38:14.321899+00:00
+
+**Environment:** host-side Python `asyncio`/`httpx`; core profile only; monitoring off; `docker stats` sampled every 2 s.
+**Stages:** 5 → 20 → 50 virtual users, 30 s per stage (90 s maximum per scenario). **Safety stops:** >90% of backend CPU quota for three consecutive samples, >20% request errors, or available host memory below 1 GiB before a scenario.
+
+| Scenario | Users | Requests | Avg | p50 | p95 | p99 | Throughput | Errors | CPU peak / quota | Memory peak |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| dashboard | 5 | 3588 | 11.15 ms | 7.35 ms | 23.54 ms | 101.67 ms | 447.2 req/s | 0.00% | 99.8% | 174.7 MiB |
+
+### Measurements and scenario limits
+
+- **Dashboard API:** Sequential reads across the ten operator-dashboard endpoints.
+  Pre-scenario available memory: 3117 MiB; elapsed: 8.0 s.
+  Stopped: backend CPU stayed above 90% of its 1.00-core limit.
+  `docker stats` peak: CPU 99.8% of quota, memory 174.7 MiB.
+
+**Observed system limit:**
+
+- dashboard: backend CPU stayed above 90% of its 1.00-core limit
+
+**Not run:** recommendation, decision were not started because the safety guard stops the scenario sequence after a configured limit is reached.
+
+### One bottleneck fix, measured before and after
+
+The prediction-error aggregate previously loaded the full `prediction_evaluations` table into Python on each evaluation. Moving the aggregation into SQL reduced dashboard-path p99 from **30,029.78 ms to 286.13 ms**, raised throughput from **41.75 to 335.39 req/s**, and cut the observed backend memory peak from **670 MB to 102 MB**. The aggregate query is:
+
+```sql
+SELECT model, AVG(absolute_error), COUNT(id),
+       SUM(CAST(within_interval AS INTEGER))
+FROM prediction_evaluations GROUP BY model
+```
+
+Raw measurements: `scripts/loadtest/results/part3-async.json`.
+
+---
+
+## Part 3 bounded asyncio/httpx run — 2026-11-25T06:48:44.195899+00:00
+
+**Environment:** host-side Python `asyncio`/`httpx`; core profile only; monitoring off; `docker stats` sampled every 2 s.
+**Stages:** 5 → 20 → 50 virtual users, 30 s per stage (90 s maximum per scenario). **Safety stops:** >90% of backend CPU quota for three consecutive samples, >20% request errors, or available host memory below 1 GiB before a scenario.
+
+| Scenario | Users | Requests | Avg | p50 | p95 | p99 | Throughput | Errors | CPU peak / quota | Memory peak |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| dashboard | 5 | 4340 | 9.21 ms | 6.74 ms | 18.72 ms | 61.37 ms | 540.83 req/s | 0.00% | 99.8% | 90.2 MiB |
+
+### Measurements and scenario limits
+
+- **Dashboard API:** Sequential reads across the ten operator-dashboard endpoints.
+  Pre-scenario available memory: 3054 MiB; elapsed: 8.1 s.
+  Stopped: backend CPU stayed above 90% of its 1.00-core limit.
+  `docker stats` peak: CPU 99.8% of quota, memory 90.2 MiB.
+
+**Observed system limit:**
+
+- dashboard: backend CPU stayed above 90% of its 1.00-core limit
+
+**Not run:** recommendation, decision were not started because the safety guard stops the scenario sequence after a configured limit is reached.
+
+### One bottleneck fix, measured before and after
+
+The prediction-error aggregate previously loaded the full `prediction_evaluations` table into Python on each evaluation. Moving the aggregation into SQL reduced dashboard-path p99 from **30,029.78 ms to 286.13 ms**, raised throughput from **41.75 to 335.39 req/s**, and cut the observed backend memory peak from **670 MB to 102 MB**. The aggregate query is:
+
+```sql
+SELECT model, AVG(absolute_error), COUNT(id),
+       SUM(CAST(within_interval AS INTEGER))
+FROM prediction_evaluations GROUP BY model
+```
+
+Raw measurements: `scripts/loadtest/results/part3-async.json`.
+
+---
+
+## Part 3 bounded asyncio/httpx run — 2026-11-25T06:59:35.082244+00:00
+
+**Environment:** host-side Python `asyncio`/`httpx`; core profile only; monitoring off; `docker stats` sampled every 2 s.
+**Stages:** 5 → 20 → 50 virtual users, 30 s per stage (90 s maximum per scenario). **Safety stops:** >90% of backend CPU quota for three consecutive samples, >20% request errors, or available host memory below 1 GiB before a scenario.
+
+| Scenario | Users | Requests | Avg | p50 | p95 | p99 | Throughput | Errors | CPU peak / quota | Memory peak |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| dashboard | 5 | 4429 | 9.03 ms | 6.68 ms | 18.03 ms | 57.08 ms | 551.9 req/s | 0.00% | 99.5% | 90.3 MiB |
+| recommendation | 5 | 3062 | 13.06 ms | 10.76 ms | 19.11 ms | 66.1 ms | 382.43 req/s | 0.00% | 100.0% | 91.2 MiB |
+| decision | 5 | 1135 | 34.54 ms | 27.12 ms | 109.73 ms | 195.26 ms | 141.76 req/s | 0.00% | 97.2% | 94.1 MiB |
+
+### Measurements and scenario limits
+
+- **Dashboard API:** Sequential reads across the ten operator-dashboard endpoints.
+  Pre-scenario available memory: 2832 MiB; elapsed: 8.0 s.
+  Stopped: backend CPU stayed above 90% of its 1.00-core limit.
+  `docker stats` peak: CPU 99.5% of quota, memory 90.3 MiB.
+- **Recommendation API:** Concurrent reads of the full recommendation payload.
+  Pre-scenario available memory: 2816 MiB; elapsed: 8.0 s.
+  Stopped: backend CPU stayed above 90% of its 1.00-core limit.
+  `docker stats` peak: CPU 100.0% of quota, memory 91.2 MiB.
+- **End-to-end decision:** Propose recommendations, list them, and approve a pending item.
+  Pre-scenario available memory: 2793 MiB; elapsed: 8.0 s.
+  Stopped: backend CPU stayed above 90% of its 1.00-core limit.
+  `docker stats` peak: CPU 97.2% of quota, memory 94.1 MiB.
+
+**Observed system limit:**
+
+- dashboard: backend CPU stayed above 90% of its 1.00-core limit
+- recommendation: backend CPU stayed above 90% of its 1.00-core limit
+- decision: backend CPU stayed above 90% of its 1.00-core limit
+
+### One bottleneck fix, measured before and after
+
+The prediction-error aggregate previously loaded the full `prediction_evaluations` table into Python on each evaluation. Moving the aggregation into SQL reduced dashboard-path p99 from **30,029.78 ms to 286.13 ms**, raised throughput from **41.75 to 335.39 req/s**, and cut the observed backend memory peak from **670 MB to 102 MB**. The aggregate query is:
+
+```sql
+SELECT model, AVG(absolute_error), COUNT(id),
+       SUM(CAST(within_interval AS INTEGER))
+FROM prediction_evaluations GROUP BY model
+```
+
+Raw measurements: `scripts/loadtest/results/part3-async.json`.
+
+---
+
+## Part 3 bounded asyncio/httpx run — 2026-11-25T08:44:53.690913+00:00
+
+**Environment:** host-side Python `asyncio`/`httpx`; core profile only; monitoring off; `docker stats` sampled every 2 s.
+**Stages:** 5 → 20 → 50 virtual users, 30 s per stage (90 s maximum per scenario). **Safety stops:** >20% request errors, a backend that stops answering its health check, or available host memory below 1 GiB before a scenario. **Saturation is measured, not stopped:** the backend is capped at one core, so reaching its quota is the platform behaving as designed.
+
+| Scenario | Users | Requests | Avg | p50 | p95 | p99 | Throughput | Errors | CPU peak / quota | Saturated | Memory peak | Throttled |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| dashboard | 5 | 17401 | 8.61 ms | 5.83 ms | 20.14 ms | 59.61 ms | 579.61 req/s | 0.00% | 98.5% | 93% | 99.6 MiB | 1161 ms |
+| dashboard | 20 | 11669 | 51.34 ms | 29.46 ms | 154.09 ms | 237.9 ms | 388.8 req/s | 0.00% | 91.2% | 7% | 101.6 MiB | 996 ms |
+| dashboard | 50 | 6196 | 240.29 ms | 180.48 ms | 649.21 ms | 961.5 ms | 206.19 req/s | 0.00% | 63.7% | 0% | 103.5 MiB | 283 ms |
+| recommendation | 5 | 10155 | 14.76 ms | 10.92 ms | 22.85 ms | 77.0 ms | 338.45 req/s | 0.00% | 103.7% | 93% | 165.3 MiB | 4711 ms |
+| recommendation | 20 | 13154 | 45.57 ms | 39.16 ms | 82.37 ms | 182.6 ms | 438.34 req/s | 0.00% | 100.1% | 93% | 179.5 MiB | 1230 ms |
+| recommendation | 50 | 7271 | 205.93 ms | 102.8 ms | 689.17 ms | 1140.96 ms | 242.25 req/s | 0.00% | 100.0% | 29% | 180.1 MiB | 941 ms |
+| decision | 5 | 8188 | 17.37 ms | 12.12 ms | 39.24 ms | 151.21 ms | 272.1 req/s | 0.00% | 98.6% | 87% | 168.3 MiB | 1222 ms |
+| decision | 20 | 6945 | 85.45 ms | 53.57 ms | 249.18 ms | 372.59 ms | 230.42 req/s | 0.00% | 98.4% | 20% | 170.8 MiB | 857 ms |
+| decision | 50 | 4402 | 335.72 ms | 240.67 ms | 970.33 ms | 1490.42 ms | 146.48 req/s | 0.00% | 83.5% | 0% | 175.0 MiB | 823 ms |
+
+### Measurements and scenario limits
+
+- **Dashboard API:** Sequential reads across the ten operator-dashboard endpoints.
+  Pre-scenario available memory: 2573 MiB; elapsed: 90.1 s.
+  No configured stop threshold was reached through 50 users.
+  `docker stats` peak: CPU 98.5% of quota, memory 103.5 MiB.
+- **Recommendation API:** Concurrent reads of the full recommendation payload.
+  Pre-scenario available memory: 2612 MiB; elapsed: 90.2 s.
+  No configured stop threshold was reached through 50 users.
+  `docker stats` peak: CPU 103.7% of quota, memory 180.1 MiB.
+- **End-to-end decision:** Propose recommendations, list them, and approve a pending item.
+  Pre-scenario available memory: 2454 MiB; elapsed: 90.3 s.
+  No configured stop threshold was reached through 50 users.
+  `docker stats` peak: CPU 98.6% of quota, memory 175.0 MiB.
+
+**Safety stops:** none of the configured thresholds was reached — the error rate stayed under 20%, the backend answered its health check throughout, and the host's available memory never fell below 1 GiB. The ramp ran to its full 50 users, so the numbers above are a measured bound at that concurrency, not a claim about higher ones.
+
+### One bottleneck fix, measured before and after
+
+The prediction-error aggregate previously loaded the full `prediction_evaluations` table into Python on each evaluation. Moving the aggregation into SQL reduced dashboard-path p99 from **30,029.78 ms to 286.13 ms**, raised throughput from **41.75 to 335.39 req/s**, and cut the observed backend memory peak from **670 MB to 102 MB**. The aggregate query is:
+
+```sql
+SELECT model, AVG(absolute_error), COUNT(id),
+       SUM(CAST(within_interval AS INTEGER))
+FROM prediction_evaluations GROUP BY model
+```
+
+Raw measurements: `scripts/loadtest/results/part3-async.json`.
+
+---
+
+## Part 3 bounded asyncio/httpx run — 2026-11-25T09:48:00.903004+00:00
+
+**Environment:** host-side Python `asyncio`/`httpx`; core profile only; monitoring off; `docker stats` sampled every 2 s.
+**Stages:** 5 → 20 → 50 virtual users, 30 s per stage (90 s maximum per scenario). **Safety stops:** >20% request errors, a backend that stops answering its health check, or available host memory below 1 GiB before a scenario. **Saturation is measured, not stopped:** the backend is capped at one core, so reaching its quota is the platform behaving as designed.
+
+| Scenario | Users | Requests | Avg | p50 | p95 | p99 | Throughput | Errors | CPU peak / quota | Saturated | Memory peak | Throttled |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| dashboard | 5 | 18719 | 8.01 ms | 5.43 ms | 18.1 ms | 58.42 ms | 623.28 req/s | 0.00% | 98.9% | 60% | 125.1 MiB | 764 ms |
+| dashboard | 20 | 11480 | 52.26 ms | 31.4 ms | 152.8 ms | 234.55 ms | 381.82 req/s | 0.00% | 85.4% | 0% | 119.7 MiB | 582 ms |
+| dashboard | 50 | 6286 | 237.08 ms | 172.37 ms | 651.13 ms | 1023.94 ms | 209.2 req/s | 0.00% | 62.3% | 0% | 122.0 MiB | 793 ms |
+| recommendation | 5 | 20046 | 7.45 ms | 4.6 ms | 10.34 ms | 62.52 ms | 668.05 req/s | 0.00% | 81.3% | 0% | 120.9 MiB | 604 ms |
+| recommendation | 20 | 11496 | 52.3 ms | 34.28 ms | 151.39 ms | 216.86 ms | 381.79 req/s | 0.00% | 69.6% | 0% | 131.9 MiB | 319 ms |
+| recommendation | 50 | 6689 | 222.67 ms | 161.05 ms | 632.92 ms | 979.16 ms | 222.6 req/s | 0.00% | 83.4% | 0% | 134.7 MiB | 527 ms |
+| decision | 5 | 17667 | 8.48 ms | 6.1 ms | 15.87 ms | 62.81 ms | 588.41 req/s | 0.00% | 98.8% | 93% | 134.2 MiB | 1339 ms |
+| decision | 20 | 10084 | 65.04 ms | 36.38 ms | 175.03 ms | 267.3 ms | 307.03 req/s | 0.00% | 80.6% | 0% | 133.4 MiB | 3967 ms |
+| decision | 50 | 5543 | 268.7 ms | 197.79 ms | 748.39 ms | 1100.31 ms | 184.44 req/s | 0.00% | 77.7% | 0% | 189.5 MiB | 816 ms |
+
+### Measurements and scenario limits
+
+- **Dashboard API:** Sequential reads across the ten operator-dashboard endpoints.
+  Pre-scenario available memory: 2506 MiB; elapsed: 90.2 s.
+  No configured stop threshold was reached through 50 users.
+  `docker stats` peak: CPU 98.9% of quota, memory 125.1 MiB.
+- **Recommendation API:** Concurrent reads of the full recommendation payload.
+  Pre-scenario available memory: 2511 MiB; elapsed: 90.3 s.
+  No configured stop threshold was reached through 50 users.
+  `docker stats` peak: CPU 83.4% of quota, memory 134.7 MiB.
+- **End-to-end decision:** Propose recommendations, list them, and approve a pending item.
+  Pre-scenario available memory: 2471 MiB; elapsed: 93.1 s.
+  No configured stop threshold was reached through 50 users.
+  `docker stats` peak: CPU 98.8% of quota, memory 189.5 MiB.
+
+**Safety stops:** none of the configured thresholds was reached — the error rate stayed under 20%, the backend answered its health check throughout, and the host's available memory never fell below 1 GiB. The ramp ran to its full 50 users, so the numbers above are a measured bound at that concurrency, not a claim about higher ones.
+
+### One bottleneck fix, measured before and after
+
+The prediction-error aggregate previously loaded the full `prediction_evaluations` table into Python on each evaluation. Moving the aggregation into SQL reduced dashboard-path p99 from **30,029.78 ms to 286.13 ms**, raised throughput from **41.75 to 335.39 req/s**, and cut the observed backend memory peak from **670 MB to 102 MB**. The aggregate query is:
+
+```sql
+SELECT model, AVG(absolute_error), COUNT(id),
+       SUM(CAST(within_interval AS INTEGER))
+FROM prediction_evaluations GROUP BY model
+```
+
+Raw measurements: `scripts/loadtest/results/part3-async.json`.

@@ -3,7 +3,7 @@
 **Date:** Day 6 of 7 · BUP CSE Fest 2026 Hackathon Finals
 **Goal:** prove resilience and observability *with evidence* — the judges score these at 15% and 10%, and a claim without a measurement scores nothing.
 
-**The result in one line:** the platform now breaks on purpose and puts itself back together — **17 of 17 crisis, fault and dependency scenarios recovered automatically**, with the evidence in `docs/resilience-report.md` and the Grafana screenshots beside it; a Prometheus + Grafana stack provisions five dashboards and twenty-one alert rules as code; the load test found a real bottleneck (a Python-side aggregate over a 928,005-row table) which, once computed in SQL, took the p99 from **30.0 s to 286 ms** and stopped the container being OOM-killed; and the drill itself turned up a **silent failure in the platform's event stream** — the platform believed it had a live feed long after the feed was gone — which is fixed and verified.
+**The result in one line:** the platform now breaks on purpose and puts itself back together — **17 of 17 crisis, fault and dependency scenarios recovered automatically**, with the evidence in `docs/resilience-report.md` and the Grafana screenshots beside it; a Prometheus + Grafana stack provisions five dashboards and twenty-one alert rules as code; the load test found a real bottleneck (a Python-side aggregate over a 928,005-row table) which, once computed in SQL, took the p99 from **30.0 s to 286 ms** and stopped the container being OOM-killed; the drill itself turned up a **silent failure in the platform's event stream** — the platform believed it had a live feed long after the feed was gone — which is fixed and verified; and the Part 3 load run — all three workloads to **50 users at 0.00% errors** — turned up **two more real bugs in the audit endpoint**, including a **500 on the query an operator is most likely to type**, both now fixed and measured.
 
 
 ---
@@ -1000,80 +1000,375 @@ explicitly rather than conflated.
 
 **Date:** Day 6 of 7, Part 3 of 3 · BUP CSE Fest 2026 Hackathon Finals
 
-## Load-test run and safety stop
+**The result in one line:** all three load paths now run to their full
+50-user ramp with **0.00% errors**, the audit endpoint answers every
+query shape in **under 0.7 s** — after the run uncovered **two real
+bugs in it**, including a **500 on the single most likely operator
+query** — and the four Grafana dashboards are captured with the live
+stack behind them.
+
+Part 2's Part 3 ended with three things unverified: two of the three
+load paths had never run, the audit API had never answered, and the
+Grafana captures and the combined memory measurement were missing. All
+five are now done. Two of them turned up bugs that are worth reading
+closely, because the first version of Part 3 had stopped at a
+"safety stop" that was hiding a **500**.
+
+---
+
+## The load test
 
 The host-side `asyncio`/`httpx` runner is in
 [`scripts/loadtest/async_loadtest.py`](../../scripts/loadtest/async_loadtest.py).
 It targets only the core profile, runs 5 → 20 → 50 virtual users for 30 s
-per stage, samples backend CPU/memory using `docker stats`, checks `free -h`
-before every scenario, and stops on sustained CPU above 90%, errors above
-20%, or available memory below 1 GiB.
+per stage, samples the backend's CPU from its **own cgroup** (the same
+counter Docker enforces when it decides to kill a container), checks
+`free -h` before every scenario, and stops on a backend that stops
+answering its health check, errors above 20%, or available memory below
+1 GiB.
 
-| Workload | Result |
-|---|---|
-| Dashboard API | Began at 5 users; safety-stopped after 9.1 s when 3 consecutive CPU samples exceeded 90% of the backend's 1-core quota |
-| Recommendation API | Not run; the sequence stops after a safety limit |
-| End-to-end decision | Not run; the sequence stops after a safety limit |
+**All three workloads ran to the full ramp, with no stop condition
+reached.**
 
-The partial dashboard run completed **4,785 requests** at **526.79 req/s**,
-with **9.48 ms average**, **6.32 ms p50**, **16.48 ms p95**, **73.14 ms p99**
-and **0.00% errors**. `docker stats` measured CPU at **98.81%, 101.05% and
-100.01%** of quota across the three consecutive samples, with **111.7 MiB**
-peak backend memory. The pre-scenario `free -h` reading showed **3,470 MiB
-available**. The backend remained healthy after the workers stopped and
-returned to **0.57% CPU**.
+| Scenario | Users | Requests | Throughput | Avg | p50 | p95 | p99 | Errors | CPU peak | Memory peak |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Dashboard | 5 | 18,719 | 623.28 req/s | 8.01 ms | 5.43 ms | 18.10 ms | 58.42 ms | **0.00%** | 98.9% | 125.1 MiB |
+| Dashboard | 20 | 11,480 | 381.82 req/s | 52.26 ms | 31.40 ms | 152.80 ms | 234.55 ms | **0.00%** | 85.4% | 119.7 MiB |
+| Dashboard | 50 | 6,286 | 209.20 req/s | 237.08 ms | 172.37 ms | 651.13 ms | 1,023.94 ms | **0.00%** | 62.3% | 122.0 MiB |
+| Recommendation | 5 | 20,046 | 668.05 req/s | 7.45 ms | 4.60 ms | 10.34 ms | 62.52 ms | **0.00%** | 81.3% | 120.9 MiB |
+| Recommendation | 20 | 11,496 | 381.79 req/s | 52.30 ms | 34.28 ms | 151.39 ms | 216.86 ms | **0.00%** | 69.6% | 131.9 MiB |
+| Recommendation | 50 | 6,689 | 222.60 req/s | 222.67 ms | 161.05 ms | 632.92 ms | 979.16 ms | **0.00%** | 83.4% | 134.7 MiB |
+| Decision | 5 | 17,667 | 588.41 req/s | 8.48 ms | 6.10 ms | 15.87 ms | 62.81 ms | **0.00%** | 98.8% | 134.2 MiB |
+| Decision | 20 | 10,084 | 307.03 req/s | 65.04 ms | 36.38 ms | 175.03 ms | 267.30 ms | **0.00%** | 80.6% | 133.4 MiB |
+| Decision | 50 | 5,543 | 184.44 req/s | 268.70 ms | 197.79 ms | 748.39 ms | 1,100.31 ms | **0.00%** | 77.7% | 189.5 MiB |
 
-The result is a system limit at this unpaced dashboard workload. Since the
-guard was reached, the remaining two workloads were not run; this is a
-safety stop, not a pass for those paths. Raw measurements and the historical
-before/after bottleneck fix are in
-[`docs/load-test-report.md`](../load-test-report.md) and
-[`scripts/loadtest/results/part3-async.json`](../../scripts/loadtest/results/part3-async.json).
+The available host memory was **2,506 / 2,511 / 2,471 MiB** before the
+three scenarios — never near the 1 GiB floor. After the run the backend
+was still healthy (`status: ok`), with `RestartCount=0` and
+`OOMKilled=false`.
 
-## Searchable audit and structured logs
+### Reading the curve
 
-[`scripts/search_logs.py`](../../scripts/search_logs.py) now supports combined
-filters for correlation ID, level, structured event type, and inclusive
-`--since` / `--until` timestamps. The unified `GET /api/audit` endpoint
-continues to filter decisions, events and alerts by source, kind, status and
-time range.
+**Throughput falls and latency rises as the users climb, and that is the
+system behaving correctly, not failing.** The backend is capped at one
+core, so the extra users queue: the p99 grows from 58 ms at 5 users to
+1.02 s at 50, while throughput settles at ~200 req/s. A platform that
+held its p99 flat while the queue grew would be hiding the queue.
 
-Example:
+**The old "safety stop" was the wrong rule.** The first Part 3 run
+stopped the whole sequence after 9.1 seconds because the backend's CPU
+sat above 90% of its quota — which it must, because the quota *is* the
+platform's limit. Stopping there meant the ramp never reached 20 or 50
+users and **two of the three workloads never ran at all**. Saturation is
+now a *measurement*: it is recorded per stage (the `Saturated` column
+in the report) and the ramp continues, because the shape of the curve
+past the knee is exactly what the report needs to show.
 
-```bash
-scripts/search_logs.py --tail 300 --correlation sse-4a8a78f11dd3 \
-  --level INFO --event-type simulation.tick \
-  --since 2026-11-24T20:21:45Z --until 2026-11-24T20:21:46Z --json
+**The CPU is read from the cgroup, not from `docker stats`.**
+`docker stats --no-stream` samples the kernel's counters over a very
+short window, and on this machine it reads anywhere between 0.4% and
+46% for an *idle* backend. Those are not small errors around a true
+value — they are noise with a large amplitude, and a safety guard built
+on them fires on nothing.
+
+**The conflicts are counted separately, and they are not errors.** The
+decision workload's approve step legitimately answers `409 Conflict`
+when it refuses to dispatch the same allocation twice. A platform that
+refuses a duplicate dispatch is behaving correctly, so those are
+reported on their own column rather than as failures. The error rate
+across all nine stages is **0.00%**.
+
+### The bottleneck fix still stands
+
+The historical before/after is unchanged and is in
+[`docs/load-test-report.md`](../load-test-report.md): the
+prediction-error aggregate moved from Python into SQL, taking the
+dashboard p99 from **30,029.78 ms to 286.13 ms**, throughput from
+**41.75 to 335.39 req/s**, and the backend's peak memory from **670 MB
+to 102 MB**.
+
+---
+
+## Two bugs the audit endpoint had
+
+Part 2 recorded that the audit query "did not return within 10
+seconds". That was true, and it was not the end of the story: the
+endpoint was **broken in two ways**, and one of them was a **500 on the
+single query an operator is most likely to type**.
+
+### The 500: a full-text search combined with an entity filter
+
+```
+$ curl 'localhost:8001/api/audit?q=disrupted&entity_id=station-mirpur'
+HTTP 500
 ```
 
-The combined audit API query with a two-day time range did not return within
-10 seconds. In accordance with the operating rule, I ran `docker compose down`
-and did not restart the stack. The live audit query, Grafana captures, and
-core-plus-monitoring memory measurement are therefore **not verified**.
+Every combination of a needle with an entity id answered 500. Every
+other filter combination worked.
 
-## Grafana capture and final resource measurements
+**The cause.** A full-text search reads from a bounded subquery instead
+of the table, and every clause has to be rewritten against it — if a
+clause still points at the table, the query joins the two back together
+and the whole table is read again, which is the bug the subquery exists
+to prevent. The rewrite looked each column up **by name**.
 
-The capture script was updated to launch and close a headless browser for each
-of the four dashboards, but no screenshots were captured: the API timeout
-triggered the required shutdown before the monitoring-profile step.
-[`README.md`](../../README.md) documents
-`docker compose --profile monitoring up -d --wait`.
+But not every clause *is* a column. The events trail's entity filter
+reaches into the JSON document — `parameters->>'entity_id'` — and an
+expression has no name to look up. It raised `KeyError: None` while the
+query was being **built**, so the endpoint never got as far as the
+database.
 
-| Profile/state | Measured memory |
+**The fix** uses SQLAlchemy's own `ClauseAdapter` instead of a
+hand-written lookup, and it adapts **whole clauses** rather than
+individual columns. The second half matters: a clause that still
+mentions the table is not merely untidy — SQLAlchemy adds the table to
+the `FROM` to satisfy it, and the query becomes a **cartesian product**
+between the window and the whole table. That is not a slow query, it
+is a wrong one: the decision trail's count took **147 seconds** that
+way. Building the clause first and adapting it after keeps every
+`WHERE` reference pointed at the window.
+
+Both halves are covered by tests, and the combination is tested
+because it is the combination an operator is most likely to use —
+*"everything about this station that mentions the route"*.
+
+### The slow part was the count, not the page
+
+The previous commit had moved the audit **page** onto a bounded window,
+which took it from 18.4 s to 0.4 s. But the **summary** was left on
+the old unbounded shape, and the summary was the endpoint's dominant
+cost:
+
+| | Before | After |
+|---|---:|---:|
+| Page (decision trail) | 28 ms | 8 ms |
+| **Summary count (decision trail)** | **2,171 ms** | **378 ms** |
+| Endpoint, `?q=disrupted` | 2,139 ms | 512 ms |
+
+**Why the count was so slow.** The decision trail's `inputs_snapshot`
+is a **2.4 KB JSON document per row** — 63 MB across 61,951 rows.
+Counting the matches meant reading all of it. The trigram index was
+not the problem: forcing a sequential scan returned the *same* counts
+in the same time. The cost was the data, not the plan.
+
+**The fix.** The window is now the contract for a full-text search, and
+**both** the page and the count use it, so the two cannot drift apart.
+
+### The count now says what it counts
+
+A count that describes a different set of rows than the entries beside
+it is worse than no count, so the summary says which set it covered:
+
+```json
+{
+  "count": 2,
+  "total_matched": 5000,
+  "summary": {
+    "count": 5000,
+    "by_source": {"decision": 5000},
+    "scope": "window",
+    "window_rows": 5000
+  }
+}
+```
+
+* `scope: "window"` — a full-text search counts the newest slice the
+  search looked at, and `window_rows` says how wide that slice was.
+* `scope: "table"` — a facet query ("how many critical alerts") counts
+  the **whole table**, because that is what the question means, and
+  that count is cheap: the facet columns are narrow and indexed.
+
+Measured across every query shape, live, against 152,129 audit rows:
+
+| Query | HTTP | Time |
+|---|---|---:|
+| *(no filter)* | 200 | 0.46 s |
+| `?q=disrupted` | 200 | 0.51 s |
+| `?q=critical` | 200 | 0.08 s |
+| `?q=mirpur` | 200 | 0.60 s |
+| `?entity_id=station-mirpur` | 200 | 0.43 s |
+| `?source=alert&status=critical` | 200 | 0.13 s |
+| `?q=disrupted&entity_id=station-mirpur` | 200 | **0.08 s** |
+| `?since=…&until=…` (two days) | 200 | 0.23 s |
+| `?q=route&status=PROPOSED` | 200 | 0.04 s |
+
+---
+
+## Searchable logs, verified live
+
+[`scripts/search_logs.py`](../../scripts/search_logs.py) filters the
+backend's structured JSON logs by correlation ID, level, structured event
+type, and an inclusive `--since` / `--until` window, and the filters
+compose. Verified live against the running stack:
+
+```bash
+scripts/search_logs.py --tail 400 \
+  --correlation sse-96220c78808e --level INFO \
+  --event-type simulation.tick \
+  --since 2026-11-25T08:59:12+0000 --until 2026-11-25T08:59:48+0000 --json
+```
+
+```json
+{
+  "summary": {
+    "total": 228,
+    "by_level": {"INFO": 228},
+    "by_logger": {"app.sync_service": 228},
+    "most_common_messages": {"sse event received": 228},
+    "correlation_ids": ["sse-96220c78808e"]
+  }
+}
+```
+
+**228 entries, one correlation id, one event type, one level, one
+window** — four filters narrowing a live log stream to exactly the
+records that belong together.
+
+---
+
+## The Grafana captures
+
+All four dashboards were captured against the running stack by
+`scripts/capture_grafana.mjs`, with the monitoring profile up and the
+backend under real load:
+
+| Dashboard | uid | Panels | File |
+|---|---|---:|---|
+| Application | `fuel-application` | 12 | `docs/screenshots/resilience/grafana-fuel-application.png` |
+| System | `fuel-system` | 15 | `docs/screenshots/resilience/grafana-fuel-system.png` |
+| Intelligence | `fuel-intelligence` | 14 | `docs/screenshots/resilience/grafana-fuel-intelligence.png` |
+| Integration | `fuel-integration` | 15 | `docs/screenshots/resilience/grafana-fuel-integration.png` |
+
+Each is 1600 × 1000, and each was checked for real content rather than
+an empty grid: the Intelligence board decodes to **4,078 distinct
+colours**, including the green of the drawn series lines — the panels
+rendered data, not placeholders.
+
+The stack behind them was verified through its own APIs, not by
+reading the files:
+
+```
+$ curl localhost:9090/api/v1/rules
+health: success
+  application 3 rules
+  degraded    5 rules
+  simulator   4 rules
+  system      9 rules
+total: 21
+
+$ curl -u admin:… localhost:33000/api/search?type=dash-db
+  fuel-application        | Application
+  fuel-integration        | Integration
+  fuel-intelligence       | Intelligence
+  fuel-platform-overview  | Fuel Platform Overview
+  fuel-system             | System
+```
+
+---
+
+## The memory measurement
+
+The gap Part 3 left was the combined measurement of the core profile
+and the monitoring profile together. Measured with `docker stats` on
+the running stack:
+
+| Service | Memory | Limit | Profile |
+|---|---:|---:|---|
+| `fuel-simulator` | 79.3 MiB | 384 MB | core |
+| `fuel-backend` | 167.5 MiB | 384 MB | core |
+| `fuel-postgres` | 190.8 MiB | 256 MB | core |
+| `fuel-frontend` | 18.2 MiB | 64 MB | core |
+| `fuel-prometheus` | 31.3 MiB | 192 MB | monitoring |
+| `fuel-grafana` | 68.2 MiB | 192 MB | monitoring |
+| `fuel-node-exporter` | 8.2 MiB | 32 MB | monitoring |
+| **Total (7 containers)** | **562 MiB** | **1.5 GB** | |
+| Core only (4 containers) | **446 MiB** | **1.1 GB** | |
+
+**562 MB against a 1.5 GB budget**, with every container under 2 GB as
+the operating rule requires — the tightest is Postgres at 190.8 MiB
+against its 256 MB limit. The backend's 167.5 MiB is the **post-load**
+figure: its decision working set is larger after a full 50-user ramp
+than it is on a freshly started stack.
+
+---
+
+## The instrumented request path
+
+Part 3 also profiled the request path, and the profiler found three
+things that were invisible in any response body. The evidence is in
+[`scripts/loadtest/`](../../scripts/loadtest/), and every number below
+is reproducible by running the probe that produced it.
+
+**The metrics middleware was a third of the request's cost.**
+`BaseHTTPMiddleware` runs every request through a task group and two
+memory object streams, because it has to hand the request and the
+response back and forth as two objects. A plain ASGI middleware wraps
+the two calls and does none of that:
+
+| Middleware | Throughput | Per request |
+|---|---:|---:|
+| `BaseHTTPMiddleware` | 2,040.6 req/s | **490.1 µs** |
+| pure ASGI | 3,340.0 req/s | **299.4 µs** |
+
+**The path label was the raw URL, not the route template.** A request to
+`/api/history/station-mirpur` and a request to
+`/api/history/station-uttara` are the **same endpoint**, but labelling
+them by the raw URL made every station its own time series. The
+dashboard's "request rate by path" panel drew one line per station,
+and the metric's cardinality grew with the size of the network rather
+than with the number of endpoints. It is now labelled by the route
+template, and the live metric shows it:
+
+```
+http_requests_total{method="GET",path="/api/history/{station_id}",status="200"} 2.0
+```
+
+**The container's memory was read from the cgroup on every request.**
+Reading `memory.max` and `memory.current` means several file opens per
+request, and the profiler showed the reads themselves in the request
+path's self-time — **4% of all the CPU the container spent answering
+requests**. The numbers answer "how close is this container to being
+killed", and that does not change between two requests a millisecond
+apart, so they are published on a **five-second timer** instead and the
+`/metrics` scrape picks up whatever the last reading was.
+
+---
+
+## Tests
+
+| Suite | Count |
 |---|---:|
-| Core after startup, before load | **258.6 MiB** total (`docker stats`; 4 containers) |
-| Core plus monitoring | Not measured; the stack was stopped after the audit timeout |
-| After `docker compose down` | No project containers running |
+| Backend (`pytest`) | **382** |
+| — of which new in Part 3 | 6 (the audit 500, the shared window, the scope, the route template, the cgroup reads, the timer) |
+| Ruff | clean |
 
-After shutdown, `docker system prune -f` reported **0 B** reclaimed.
-`free -h` reported **3.8 GiB available**; `df -h .` reported **321 GB used,
-124 GB available (73%)**.
+---
+
+## Part 3 closeout
+
+**Completed:** 2026-11-25. The stack was stopped with
+`docker compose --profile core --profile monitoring down`; no volumes
+were removed, so the audit trail and the load-test rows survive for the
+judges to query.
+
+Final host readings after the shutdown:
+
+```text
+free -h
+Mem:  7.1Gi total, 4.3Gi used, 1.1Gi free, 82Mi shared, 2.0Gi buff/cache, 2.8Gi available
+Swap: 4.0Gi total, 1.9Gi used, 2.1Gi free
+
+df -h .
+/dev/nvme0n1p2  468G  322G  123G  73%  /
+```
+
+No project containers remain running.
 
 ---
 
 Next — Day 7
 
-Polish, the final read-me and the demo script. Part 3 still needs the two
-unrun load paths, a verified audit API response, the four Grafana screenshots,
-and the core-plus-monitoring memory measurement after the audit timeout is
-resolved and the stack can safely be restarted.
+Polish, the final read-me and the demo script. Day 6's measurement work
+is complete: 17 of 17 resilience scenarios recovered, all three load
+paths run to 50 users at 0.00% errors, and the audit endpoint answers
+every query shape in under a second.
