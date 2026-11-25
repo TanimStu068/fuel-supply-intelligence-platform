@@ -30,13 +30,24 @@ ERROR_RATE_LIMIT = 0.20
 CPU_LIMIT_PERCENT = 90.0
 CPU_HIGH_SAMPLES_TO_STOP = 3
 
+#: The recommendation list is capped by the page size, but the store grows
+#: while the platform runs, so two runs minutes apart would serve different
+#: payloads and their throughputs would not be comparable. The
+#: recommendation read path therefore asks for a fixed number of rows, and
+#: the dashboard path asks for the same list. Without this, a "before" and
+#: an "after" measured ten minutes apart differ by more than the change
+#: being measured.
+FIXED_PAGE_SIZE = 50
+
+RECOMMENDATIONS_PATH = f"/api/recommendations?limit={FIXED_PAGE_SIZE}"
+
 DASHBOARD_ENDPOINTS = (
     "/api/stations",
     "/api/depots",
     "/api/routes",
     "/api/risk",
     "/api/alerts",
-    "/api/recommendations",
+    RECOMMENDATIONS_PATH,
     "/api/events",
     "/api/supply-arrivals",
     "/api/allocations",
@@ -242,7 +253,7 @@ async def _recommendation_worker(
     stopped: asyncio.Event,
 ) -> None:
     while not stopped.is_set():
-        await _request(client, "GET", "/api/recommendations", samples)
+        await _request(client, "GET", RECOMMENDATIONS_PATH, samples)
 
 
 async def _decision_worker(
@@ -256,7 +267,7 @@ async def _decision_worker(
         )
         if proposal is None or proposal.status_code != 200:
             continue
-        listing = await _request(client, "GET", "/api/recommendations", samples)
+        listing = await _request(client, "GET", RECOMMENDATIONS_PATH, samples)
         if listing is None or listing.status_code != 200:
             continue
         try:
