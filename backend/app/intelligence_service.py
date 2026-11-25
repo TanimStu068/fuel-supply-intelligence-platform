@@ -21,7 +21,7 @@ import json
 import logging
 from typing import Any
 
-from sqlalchemy import Float, func, select
+from sqlalchemy import Float, func, literal_column, select
 from sqlalchemy.dialects.postgresql import JSONB
 
 from .config import get_settings
@@ -877,31 +877,35 @@ class IntelligenceService:
             # JSON array server-side and hands back only the columns the
             # scoring needs, so the payload never crosses into the
             # application at all.
+            #
+            # The array is expanded **once**: writing ``jsonb_array_elements``
+            # four times would produce four independent expansions that
+            # Postgres cannot correlate, and it says so — "cannot extract
+            # elements from an object". The expansion is a lateral join, and
+            # each field is read out of the expanded element.
+            point_element = literal_column("point")
             point_rows = await session.execute(
                 select(
                     DemandForecast.station_id,
                     DemandForecast.fuel_type,
                     DemandForecast.sim_tick,
                     DemandForecast.model,
-                    func.jsonb_array_elements(DemandForecast.payload.cast(JSONB))
-                    .op("->>")("tick")
-                    .label("target_tick"),
-                    func.jsonb_array_elements(DemandForecast.payload.cast(JSONB))
-                    .op("->>")("predicted_demand")
+                    point_element.op("->>")("tick").label("target_tick"),
+                    point_element.op("->>")("predicted_demand")
                     .cast(Float)
                     .label("predicted_demand"),
-                    func.jsonb_array_elements(DemandForecast.payload.cast(JSONB))
-                    .op("->>")("lower_bound")
-                    .cast(Float)
-                    .label("lower_bound"),
-                    func.jsonb_array_elements(DemandForecast.payload.cast(JSONB))
-                    .op("->>")("upper_bound")
-                    .cast(Float)
-                    .label("upper_bound"),
-                ).where(
+                    point_element.op("->>")("lower_bound").cast(Float).label("lower_bound"),
+                    point_element.op("->>")("upper_bound").cast(Float).label("upper_bound"),
+                )
+                .where(
                     DemandForecast.sim_tick >= window_start,
                     DemandForecast.sim_tick < current_tick,
                 )
+                .select_from(
+                    DemandForecast,
+                    func.jsonb_array_elements(DemandForecast.payload.cast(JSONB)).alias("point"),
+                )
+                .correlate(DemandForecast)
             )
 
             expanded_rows = point_rows.all()
