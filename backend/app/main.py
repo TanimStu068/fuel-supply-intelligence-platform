@@ -1411,49 +1411,14 @@ def _http_metrics() -> dict[str, Any]:
     The dashboard shows p95 latency and the error rate; both come from the
     same registry Prometheus scrapes, so the panel and the Grafana
     dashboard cannot disagree.
+
+    The numbers are read from the registry's **own state**, not from
+    ``collect()``. Collecting materialises every sample of every
+    labelled child — 234 series after a few minutes of real traffic —
+    and the dashboard polls this endpoint every few seconds, so
+    collecting on the request path made the platform spend a fifth of
+    its CPU budget measuring its own latency.
     """
-    from .metrics import HTTP_REQUEST_DURATION, HTTP_REQUESTS
+    from .metrics import request_latency_summary
 
-    # The histogram's buckets are *cumulative counts* per upper bound, so
-    # the 95th percentile is the largest boundary whose cumulative count
-    # reaches 95% of the observations. Summing the buckets instead would
-    # give the observation count, not a latency.
-    buckets: list[tuple[float, float]] = []
-    observations = 0
-    for metric in HTTP_REQUEST_DURATION.collect():
-        for sample in metric.samples:
-            if sample.name.endswith("_count"):
-                observations += sample.value
-            elif sample.name.endswith("_bucket"):
-                try:
-                    boundary = float(sample.labels.get("le", "+Inf"))
-                except ValueError:
-                    continue
-                buckets.append((boundary, sample.value))
-
-    p95 = 0.0
-    if buckets and observations > 0:
-        buckets.sort()
-        target = observations * 0.95
-        cumulative = 0.0
-        for boundary, count in buckets:
-            cumulative += count
-            if cumulative >= target:
-                p95 = boundary
-                break
-
-    errors = 0
-    total = 0
-    for metric in HTTP_REQUESTS.collect():
-        for sample in metric.samples:
-            if sample.name.endswith("_total"):
-                total += sample.value
-                if sample.labels.get("status", "").startswith("5"):
-                    errors += sample.value
-
-    return {
-        "p95_latency_seconds": round(p95, 6),
-        "request_count": int(total),
-        "error_count": int(errors),
-        "error_rate": round(errors / total, 6) if total else 0.0,
-    }
+    return request_latency_summary()

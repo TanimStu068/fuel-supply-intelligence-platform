@@ -7,7 +7,6 @@ import argparse
 import asyncio
 import json
 import os
-import re
 import statistics
 import subprocess
 import time
@@ -103,6 +102,9 @@ class StageResult:
     cpu_percent_of_limit: list[float] = field(default_factory=list)
     memory_mib: list[float] = field(default_factory=list)
     host_load_average: list[float] = field(default_factory=list)
+    #: How long the container spent throttled by its CPU quota, in
+    #: milliseconds. The kernel's own verdict on the quota.
+    throttled_ms: float = 0.0
     stop_reason: str | None = None
 
 
@@ -134,53 +136,112 @@ def _print_free_h() -> float:
     return available
 
 
-def _parse_bytes(value: str) -> float:
-    match = re.search(r"([0-9.]+)\s*([kmgt]?i?b)", value, re.IGNORECASE)
-    if not match:
-        raise ValueError(f"unrecognized docker stats memory value: {value!r}")
-    number = float(match.group(1))
-    unit = match.group(2).lower()
-    powers = {
-        "b": (1, 0),
-        "kb": (1000, 1),
-        "mb": (1000, 2),
-        "gb": (1000, 3),
-        "tb": (1000, 4),
-        "kib": (1024, 1),
-        "mib": (1024, 2),
-        "gib": (1024, 3),
-        "tib": (1024, 4),
-    }
-    base, exponent = powers[unit]
-    return number * base**exponent
+def _cgroup_path(container: str) -> Path:
+    """The cgroup directory of a container.
+
+    Resolved through ``/proc/<pid>/cgroup`` rather than guessed from the
+    container's id, because the scope's name is not always the id.
+    """
+    pid = subprocess.run(
+        ["docker", "inspect", "--format", "{{.State.Pid}}", container],
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=True,
+    ).stdout.strip()
+    if not pid or pid == "0":
+        raise RuntimeError(f"{container} is not running")
+    for line in Path(f"/proc/{pid}/cgroup").read_text().splitlines():
+        parts = line.split(":", 2)
+        if len(parts) != 3:
+            continue
+        path = parts[2].strip()
+        # The line is "0::<path>" for the unified hierarchy.
+        if not path.startswith("/"):
+            continue
+        candidate = Path("/sys/fs/cgroup") / path.lstrip("/")
+        if candidate.exists():
+            return candidate
+    raise RuntimeError(f"could not find the cgroup of {container}")
 
 
-async def _docker_stats(cpu_limit_cores: float) -> tuple[float, float]:
-    process = await asyncio.create_subprocess_exec(
-        "docker",
-        "stats",
-        "fuel-backend",
-        "--no-stream",
-        "--format",
-        "{{.CPUPerc}}\t{{.MemUsage}}",
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
+_CGROUP_CACHE: dict[str, Path] = {}
+
+
+def _backend_cgroup() -> Path:
+    """The backend's cgroup directory, resolved once."""
+    if "backend" not in _CGROUP_CACHE:
+        _CGROUP_CACHE["backend"] = _cgroup_path("fuel-backend")
+    return _CGROUP_CACHE["backend"]
+
+
+def _read_cpu_usec(cgroup: Path) -> int:
+    """The container's cumulative CPU use, in microseconds."""
+    for line in (cgroup / "cpu.stat").read_text().splitlines():
+        if line.startswith("usage_usec"):
+            return int(line.split()[1])
+    raise RuntimeError("cpu.stat has no usage_usec")
+
+
+def _read_throttled_usec(cgroup: Path) -> int:
+    """The cumulative time the container spent throttled."""
+    for line in (cgroup / "cpu.stat").read_text().splitlines():
+        if line.startswith("throttled_usec"):
+            return int(line.split()[1])
+    return 0
+
+
+def _read_memory_bytes(cgroup: Path) -> int:
+    """The container's current memory use, in bytes."""
+    return int((cgroup / "memory.current").read_text().strip())
+
+
+async def _cgroup_sample(
+    cpu_limit_cores: float,
+    previous_usec: float,
+    previous_at: float,
+) -> tuple[float, float, float]:
+    """Sample the backend's CPU, memory and throttle counters.
+
+    The CPU is the *difference* in ``usage_usec`` since the previous
+    sample, divided by the elapsed wall-clock time and by the quota. The
+    first call of a stage has no previous sample, so it reports zero and
+    is not used for the guard.
+
+    **Not from ``docker stats``.** ``docker stats --no-stream`` samples
+    the kernel's counters over a very short window, and on this machine
+    it reads anywhere between 0.4% and 46% for an *idle* backend. Those
+    are not small errors around a true value — they are noise with a
+    large amplitude, and a safety guard built on them fires on nothing.
+    The cgroup is the same counter Docker enforces when it decides to
+    kill a container, and it is exact: ``usage_usec`` is a monotonic
+    count of the CPU the container has used.
+    """
+    cgroup = _backend_cgroup()
+    usage_usec = float(_read_cpu_usec(cgroup))
+    memory_bytes = _read_memory_bytes(cgroup)
+    now = time.monotonic()
+
+    if previous_usec <= 0 or now <= previous_at:
+        cpu_percent = 0.0
+    else:
+        cores_used = (usage_usec - previous_usec) / 1_000_000 / (now - previous_at)
+        cpu_percent = 100.0 * cores_used / max(cpu_limit_cores, 0.01)
+
+    return cpu_percent, memory_bytes / (1024**2), usage_usec
+
+
+def _throttled_usec() -> float:
+    """The cumulative time the backend spent throttled by its CPU quota.
+
+    This is the counter that says the container asked for more CPU than
+    it was allowed and was made to wait. It is the kernel's own verdict
+    on the quota, not an estimate.
+    """
     try:
-        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=3)
-    except TimeoutError:
-        process.kill()
-        await process.wait()
-        raise RuntimeError("docker stats did not respond within 3 seconds")
-    if process.returncode != 0:
-        raise RuntimeError(stderr.decode(errors="replace").strip())
-    line = stdout.decode().strip()
-    if not line:
-        raise RuntimeError("docker stats returned no backend sample")
-    cpu_text, memory_text = line.split("\t", 1)
-    cpu_percent = float(cpu_text.strip().rstrip("%")) / cpu_limit_cores
-    memory_bytes = _parse_bytes(memory_text.split("/", 1)[0].strip())
-    return cpu_percent, memory_bytes / (1024**2)
+        return float(_read_throttled_usec(_backend_cgroup()))
+    except (OSError, RuntimeError):
+        return 0.0
 
 
 async def _cpu_limit_cores() -> float:
@@ -370,12 +431,23 @@ async def _run_stage(
     started = time.monotonic()
     deadline = started + seconds
 
+    # The CPU is measured as the *difference* in the cgroup's cumulative
+    # counter between two samples, so the first sample only establishes
+    # the baseline.
+    previous_usec = 0.0
+    previous_at = started
+    throttled_before = _throttled_usec()
+
     try:
         while time.monotonic() < deadline:
             await asyncio.sleep(
                 min(SAMPLE_INTERVAL_SECONDS, deadline - time.monotonic())
             )
-            cpu_percent, memory_mib = await _docker_stats(cpu_limit_cores)
+            cpu_percent, memory_mib, usage_usec = await _cgroup_sample(
+                cpu_limit_cores, previous_usec, previous_at
+            )
+            previous_usec = usage_usec
+            previous_at = time.monotonic()
             cpu_samples.append(cpu_percent)
             memory_samples.append(memory_mib)
             host_load.append(os.getloadavg()[0])
@@ -419,6 +491,7 @@ async def _run_stage(
         cpu_percent_of_limit=cpu_samples,
         memory_mib=memory_samples,
         host_load_average=host_load,
+        throttled_ms=round((_throttled_usec() - throttled_before) / 1000, 1),
         stop_reason=stop_reason,
     )
     return stage, not await _probe_responsive(client)

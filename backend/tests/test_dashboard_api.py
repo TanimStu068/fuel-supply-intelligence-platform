@@ -373,6 +373,68 @@ def test_the_service_health_panel_reports_the_http_metrics(client: TestClient) -
     assert 0.0 <= http["error_rate"] <= 1.0
 
 
+def test_the_latency_summary_agrees_with_the_prometheus_registry() -> None:
+    """The fast summary must report what ``collect()`` reports.
+
+    The summary is read from the registry's own state instead of
+    collecting it, because collecting materialises every sample of every
+    labelled child and the dashboard polls this endpoint every few
+    seconds. A faster number that is a *different* number would be
+    worse than the slow one, so the two are compared here.
+    """
+    from app.metrics import (
+        HTTP_REQUEST_DURATION,
+        HTTP_REQUESTS,
+        request_latency_summary,
+    )
+
+    HTTP_REQUEST_DURATION.labels(method="GET", path="/api/test-fast").observe(0.01)
+    HTTP_REQUEST_DURATION.labels(method="GET", path="/api/test-fast").observe(0.5)
+    HTTP_REQUEST_DURATION.labels(method="GET", path="/api/test-slow").observe(0.02)
+    HTTP_REQUESTS.labels(method="GET", path="/api/test-fast", status="200").inc(2)
+    HTTP_REQUESTS.labels(method="GET", path="/api/test-fast", status="500").inc(1)
+
+    # The slow way: collect every sample and walk them.
+    buckets: list[tuple[float, float]] = []
+    observations = 0
+    for metric in HTTP_REQUEST_DURATION.collect():
+        for sample in metric.samples:
+            if sample.name.endswith("_count"):
+                observations += sample.value
+            elif sample.name.endswith("_bucket"):
+                try:
+                    boundary = float(sample.labels.get("le", "+Inf"))
+                except ValueError:
+                    continue
+                buckets.append((boundary, sample.value))
+
+    p95 = 0.0
+    if buckets and observations > 0:
+        buckets.sort()
+        target = observations * 0.95
+        cumulative = 0.0
+        for boundary, count in buckets:
+            cumulative += count
+            if cumulative >= target:
+                p95 = boundary
+                break
+
+    errors = 0
+    total = 0
+    for metric in HTTP_REQUESTS.collect():
+        for sample in metric.samples:
+            if sample.name.endswith("_total"):
+                total += sample.value
+                if sample.labels.get("status", "").startswith("5"):
+                    errors += sample.value
+
+    fast = request_latency_summary()
+
+    assert fast["p95_latency_seconds"] == round(p95, 6)
+    assert fast["request_count"] == int(total)
+    assert fast["error_count"] == int(errors)
+
+
 def test_the_service_health_panel_reports_the_fallback_state(client: TestClient) -> None:
     response = client.get("/api/service-health")
 
