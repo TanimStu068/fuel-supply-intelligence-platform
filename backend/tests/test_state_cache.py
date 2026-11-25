@@ -17,7 +17,7 @@ from app.simulator_models import (
 from app.state_cache import CachedState, StateCache
 
 
-def _state(stale: bool = False) -> CachedState:
+def _state(stale: bool = False, tick: int = 0) -> CachedState:
     return CachedState(
         instance=Instance.model_validate(
             {
@@ -26,7 +26,7 @@ def _state(stale: bool = False) -> CachedState:
                 "scenario_version": "1.0",
                 "seed": 1,
                 "sim_time": "2026-01-01T00:00:00+00:00",
-                "tick": 0,
+                "tick": tick,
                 "tick_minutes": 15,
                 "status": "PAUSED",
             }
@@ -190,6 +190,80 @@ def test_invalidate_drops_the_snapshot() -> None:
 
     assert cache.state is None
     assert cache.has_state is False
+
+
+# --- the clock going backwards ------------------------------------------------
+
+
+def test_a_rewound_clock_is_recorded() -> None:
+    """A snapshot from a rewound clock is noticed.
+
+    ``POST /admin/reset`` on the simulator starts the world again at tick
+    0, so the tick numbers of the old run and the new one overlap. The
+    cache has to be able to say "the world was reset", because the event
+    stream's tick tracker depends on it.
+    """
+    cache = StateCache()
+    cache.store(_state(tick=900))
+
+    assert cache.rewound is False
+
+    cache.store(_state(tick=0))
+
+    assert cache.rewound is True
+
+
+def test_a_forward_snapshot_is_not_a_rewind() -> None:
+    """The ordinary case: the clock moved on, and nothing was flagged."""
+    cache = StateCache()
+    cache.store(_state(tick=10))
+
+    cache.store(_state(tick=11))
+
+    assert cache.rewound is False
+    assert cache.state is not None
+    assert cache.state.instance.tick == 11
+
+
+def test_the_same_tick_is_not_a_rewind() -> None:
+    """A re-read of the same tick is not a reset."""
+    cache = StateCache()
+    cache.store(_state(tick=42))
+
+    cache.store(_state(tick=42))
+
+    assert cache.rewound is False
+    assert cache.state is not None
+    assert cache.state.instance.tick == 42
+
+
+def test_a_rewound_snapshot_still_becomes_the_cached_state() -> None:
+    """The new world's snapshot is the current world, so it is kept.
+
+    The cache must not throw the new world's numbers away — they are the
+    truth now. What matters is that the rewind is *recorded*, so the
+    caller can reset the tick trackers that still refer to the old world.
+    """
+    cache = StateCache()
+    cache.store(_state(tick=900))
+
+    cache.store(_state(tick=3))
+
+    assert cache.rewound is True
+    assert cache.state is not None
+    assert cache.state.instance.tick == 3
+    assert cache.degraded is False
+    assert cache.last_sync_age() is not None
+
+
+def test_the_first_snapshot_is_never_a_rewind() -> None:
+    """A cache that has never held anything cannot be rewound."""
+    cache = StateCache()
+
+    cache.store(_state(tick=0))
+
+    assert cache.rewound is False
+    assert cache.has_state is True
 
 
 def test_age_grows_over_time() -> None:

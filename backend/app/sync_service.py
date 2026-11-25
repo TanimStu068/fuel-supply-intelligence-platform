@@ -214,6 +214,30 @@ class SyncService:
         )
         await asyncio.sleep(remaining)
 
+    async def forget_the_previous_world(self) -> None:
+        """Drop the cached state and the stream's tick trackers.
+
+        The simulator's clock went backwards — the world was reset — and
+        the platform is still holding the *previous* world's snapshot. Left
+        alone it would serve that snapshot as fresh until the next sync
+        cycle, which is up to fifteen seconds away: numbers from a run
+        that has ended, presented as the current state.
+
+        Dropping the cache is the honest answer. The API answers 503
+        ("no simulator state available yet") until the next cycle fetches
+        the new world, which is exactly what it says.
+
+        The stream's tick tracker is reset for the same reason. The event
+        stream carries the old world's ticks, and a tracker left at tick
+        900 would call the new world's stream permanently stale — the
+        platform would drop a healthy stream every few seconds and
+        reconnect, for ever.
+        """
+        self._cache.invalidate()
+        self._sse_highest_tick = 0
+        self._sse_behind_since = None
+        logger.info("the cached state was dropped; the world was reset")
+
     async def run_sync_cycle(self, *, throttled: bool = True) -> bool:
         """Fetch the whole world, store it, and mirror it into Postgres.
 
@@ -305,6 +329,22 @@ class SyncService:
             self._cache.invalidate()
 
         self._cache.store(snapshot)
+
+        if self._cache.rewound:
+            # The simulator's clock went backwards: the world was reset.
+            # The event stream's tick tracker has to be reset too — it is
+            # carrying the *old* world's ticks, and a tracker left at tick
+            # 900 would call the new world's stream permanently stale and
+            # drop it every few seconds.
+            self._sse_highest_tick = 0
+            self._sse_behind_since = None
+            logger.warning(
+                "the simulator was reset; the event stream's tick tracker was reset",
+                extra={
+                    "correlation_id": correlation_id,
+                    "incoming_tick": snapshot.instance.tick,
+                },
+            )
 
         # Each step of the cycle is timed separately. The whole cycle's
         # duration is dominated by one step, and without this split there
@@ -764,7 +804,15 @@ class SyncService:
             if event.is_notice:
                 # A notice means the simulator itself did something (a reset,
                 # or a background-runner exception). Re-read the whole world.
-                self._schedule_refresh(self._request_sync())
+                #
+                # The simulator announces a reset on the stream ("Simulation
+                # reset"), and that announcement is the only *prompt* signal
+                # the platform gets that the world's clock went backwards.
+                # The cached state is dropped before the re-read, so there is
+                # no window in which the previous world's numbers are
+                # served as fresh — the platform says "no state yet" until
+                # the new world is fetched.
+                self._schedule_refresh(self._handle_notice())
         except SimulatorAPIError as exc:
             logger.warning(
                 "could not refresh after an sse event",
@@ -775,6 +823,17 @@ class SyncService:
                 "simulator unreachable while refreshing after an sse event",
                 extra={"event": event.event, "error": str(exc)},
             )
+
+    async def _handle_notice(self) -> None:
+        """React to a simulator notice: drop the stale world, then re-read.
+
+        A notice carries no payload the platform can act on — it only says
+        the simulator did something to itself. The reset is the case that
+        matters, because the world's clock went backwards and the cache is
+        holding a snapshot of a world that has ended.
+        """
+        await self.forget_the_previous_world()
+        await self._request_sync()
 
     def _schedule_refresh(self, coro) -> None:
         """Start a refresh without waiting for it, and keep it alive.

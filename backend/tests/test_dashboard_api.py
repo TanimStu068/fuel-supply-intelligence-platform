@@ -156,6 +156,12 @@ class _FakeResult:
 
 
 class _FakeSync:
+    def __init__(self, cache: StateCache | None = None) -> None:
+        #: The cache a reset drops. The real sync service holds the same
+        #: reference, and a reset drops the snapshot of the world that
+        #: has ended.
+        self.cache = cache
+
     def status(self) -> dict[str, Any]:
         return {
             "polling": True,
@@ -166,6 +172,11 @@ class _FakeSync:
             "has_state": True,
             "checked_at": "2026-01-01T08:00:00+00:00",
         }
+
+    async def forget_the_previous_world(self) -> None:
+        """A reset drops the cached snapshot of the world that has ended."""
+        if self.cache is not None:
+            self.cache.invalidate()
 
 
 def _cache() -> StateCache:
@@ -252,10 +263,11 @@ def simulator() -> _FakeSimulator:
 
 @pytest.fixture
 def client(simulator: _FakeSimulator) -> TestClient:
+    cache = _cache()
     app.dependency_overrides[get_simulator] = lambda: simulator
     app.dependency_overrides[get_database] = lambda: _FakeDatabase()
-    app.dependency_overrides[get_cache] = lambda: _cache()
-    app.dependency_overrides[get_sync] = lambda: _FakeSync()
+    app.dependency_overrides[get_cache] = lambda: cache
+    app.dependency_overrides[get_sync] = lambda: _FakeSync(cache)
     with TestClient(app) as test_client:
         yield test_client
     app.dependency_overrides.clear()
@@ -291,6 +303,45 @@ def test_an_unknown_simulation_action_is_refused(client: TestClient) -> None:
 
     assert response.status_code == 400
     assert "explode" in response.json()["detail"]
+
+
+def test_a_reset_drops_the_cached_state_of_the_world_that_ended(
+    client: TestClient,
+) -> None:
+    """A reset must not leave the old world in the cache.
+
+    The simulator's clock goes back to zero on a reset, so the cached
+    snapshot is a world that has ended. Serving it as fresh would be the
+    platform presenting the previous run's numbers as the current state —
+    and ``/api/state`` answers 503 until the new world is fetched.
+    """
+    assert client.get("/api/state").status_code == 200
+
+    response = client.post("/api/simulation/reset")
+
+    assert response.status_code == 200
+    state = client.get("/api/state")
+    assert state.status_code == 503
+    assert "no simulator state" in state.json()["detail"]
+
+
+def test_a_reset_of_the_world_also_clears_the_platform() -> None:
+    """``/admin/reset`` clears the platform's own working set too."""
+    cache = _cache()
+    app.dependency_overrides[get_simulator] = lambda: _FakeSimulator()
+    app.dependency_overrides[get_database] = lambda: _FakeDatabase()
+    app.dependency_overrides[get_cache] = lambda: cache
+    app.dependency_overrides[get_sync] = lambda: _FakeSync(cache)
+    with TestClient(app) as client:
+        response = client.post("/admin/reset")
+
+    app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["reset"] is True
+    assert body["kill_switch"] is False
+    assert body["prediction_fault"] is None
 
 
 def test_a_simulator_failure_is_reported_not_raised(

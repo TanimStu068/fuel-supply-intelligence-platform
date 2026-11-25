@@ -372,8 +372,12 @@ curl -s -X POST $BACKEND/api/model/fault \
   -H 'Content-Type: application/json' \
   -d '{"fault":null}' | jq
 
-# Wait for the model to be trusted again. The recovery is on the next
-# evaluation cycle, so about ten seconds.
+# The model has to earn its way back: it is only used when it beats the
+# rule-based predictor on a held-out split, and that score comes from a
+# training run. The trainer's own schedule is five minutes, so ask for it.
+curl -s -X POST $BACKEND/api/model/train | jq '{trained, training_rows}'
+
+# Wait for the platform to use it again — the next evaluation cycle.
 sleep 15
 curl -s $BACKEND/api/risk | jq '{active_model, models_used}'
 ```

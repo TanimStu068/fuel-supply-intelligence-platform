@@ -298,6 +298,33 @@ class DecisionService:
 
         return recommendations
 
+    def reset(self) -> int:
+        """Clear the working set, and return how many recommendations went.
+
+        The platform's decisions are cleared so a demo — or a drill — starts
+        from a known state.
+
+        This clears the **in-memory working set** as well as the counters.
+        The in-memory set is the one that matters for the reset: it is what
+        ``/api/recommendations`` serves and what an approval looks the
+        recommendation up in. Clearing only Postgres would leave the
+        previous run's proposals in memory, and every one of them would
+        fail to approve — they were planned for a world that no longer
+        exists, and the simulator would refuse them with *"the depot's
+        dispatch allowance for this tick is used up"* or *"the station's
+        tank is full"*. The audit trail is deliberately **not** touched:
+        Postgres keeps the history, and ``/api/decision-history`` serves it.
+        """
+        cleared = len(self._recommendations)
+        self._recommendations.clear()
+        self._proposal_times.clear()
+        self._conflicts_by_code.clear()
+        for name in self._counters:
+            self._counters[name] = 0
+        self.set_fallback_reason(None)
+        logger.info("the decision working set was cleared", extra={"cleared": cleared})
+        return cleared
+
     def _evict_old_recommendations(self) -> None:
         """Keep the in-memory store within its bound.
 

@@ -14,6 +14,7 @@ flag and the age always travel with the payload.
 
 from __future__ import annotations
 
+import logging
 import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -30,6 +31,8 @@ from .simulator_models import (
     Station,
     SupplyArrival,
 )
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -76,6 +79,13 @@ class StateCache:
     The cache is deliberately simple: one slot, replaced wholesale on every
     successful sync. A partial update would let a consumer see a snapshot
     that mixes two ticks, which is worse than a slightly older consistent one.
+
+    **The cache never serves a world that no longer exists.** A simulator
+    reset rewinds the clock to tick 0, and until the next sync the cache
+    still holds the *previous* run's snapshot — a tick the world no longer
+    has. Serving it as fresh would be the platform presenting numbers from
+    a run that has ended as if they were the current state, so a rewind
+    invalidates the cache instead of refreshing it.
     """
 
     def __init__(self) -> None:
@@ -84,6 +94,9 @@ class StateCache:
         self._degraded = False
         #: Human-readable reason for the degraded state.
         self._degraded_reason: str | None = None
+        #: Set when a sync brought a snapshot from a rewound clock, so the
+        #: cached state was dropped rather than replaced.
+        self._rewound = False
         #: Wall-clock time of the last successful sync.
         self._last_sync_at: float | None = None
         #: Wall-clock time of the last *attempted* sync, successful or not.
@@ -111,6 +124,16 @@ class StateCache:
         """True once a snapshot has been stored at least once."""
         return self._state is not None
 
+    @property
+    def rewound(self) -> bool:
+        """True when the last store was refused because the clock rewound.
+
+        The sync service reads this to reset its own tick trackers: the
+        event stream carries the *old* world's ticks, and a tracker left
+        at tick 900 would call the new world's stream permanently stale.
+        """
+        return self._rewound
+
     def last_sync_age(self, now: float | None = None) -> float | None:
         """Seconds since the last successful sync, or ``None`` if never synced."""
         if self._last_sync_at is None:
@@ -137,7 +160,39 @@ class StateCache:
     # -- writes -------------------------------------------------------------
 
     def store(self, state: CachedState) -> None:
-        """Replace the cached snapshot and clear the degraded flag."""
+        """Replace the cached snapshot and clear the degraded flag.
+
+        A snapshot from a **rewound** clock is a new world, not a fresher
+        view of the old one. ``POST /admin/reset`` on the simulator starts
+        the world again at tick 0, and the tick numbers of the old run and
+        the new one overlap — so a snapshot whose tick is *behind* the one
+        already cached means the world was reset behind the platform's
+        back.
+
+        The incoming snapshot is still stored, because it *is* the current
+        world; what is recorded is that a rewind happened, so the sync
+        service can reset the event stream's own tick tracker. The stream
+        carries the old world's ticks, and a tracker left at tick 900 would
+        call the new world's stream permanently stale and drop it every few
+        seconds.
+
+        The window in which the platform serves the *old* world is closed
+        at the other end, by the reset endpoints: a reset the platform
+        performs itself invalidates the cache and re-syncs immediately, so
+        there is no interval in which the old world's numbers are served
+        as fresh.
+        """
+        previous = self._state
+        self._rewound = previous is not None and state.instance.tick < previous.instance.tick
+        if self._rewound:
+            logger.warning(
+                "the simulator's clock went backwards; the world was reset",
+                extra={
+                    "cached_tick": previous.instance.tick,
+                    "incoming_tick": state.instance.tick,
+                },
+            )
+
         self._state = state
         self._degraded = False
         self._degraded_reason = None

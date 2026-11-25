@@ -6,10 +6,13 @@
 
 Built for the BUP CSE Fest 2026 Hackathon Finals · in association with Poridhi.io
 
-[![Status](https://img.shields.io/badge/status-Day%205%20of%207%20complete-2563eb?style=flat-square)](docs/progress/day5.md)
-[![Backend tests](https://img.shields.io/badge/backend-317%20tests%20passing-16a34a?style=flat-square)](backend/tests)
+[![CI](https://github.com/TanimStu068/fuel-supply-intelligence-platform/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/TanimStu068/fuel-supply-intelligence-platform/actions/workflows/ci.yml)
+[![Release](https://github.com/TanimStu068/fuel-supply-intelligence-platform/actions/workflows/release.yml/badge.svg)](https://github.com/TanimStu068/fuel-supply-intelligence-platform/actions/workflows/release.yml)
+[![Status](https://img.shields.io/badge/status-v1.0.0%20released-16a34a?style=flat-square)](docs/progress/day7.md)
+[![Backend tests](https://img.shields.io/badge/backend-583%20tests%20passing-16a34a?style=flat-square)](backend/tests)
+[![Coverage](https://img.shields.io/badge/coverage-85%25-16a34a?style=flat-square)](backend/app)
 [![Frontend tests](https://img.shields.io/badge/frontend-22%20unit%20%2B%2012%20e2e-16a34a?style=flat-square)](frontend/src/components/components.test.tsx)
-[![Simulation only](https://img.shields.io/badge/simulation-only-f59e0b?style=flat-square)](#15-rules-we-hold-ourselves-to)
+[![Simulation only](https://img.shields.io/badge/simulation-only-f59e0b?style=flat-square)](#17-rules-we-hold-ourselves-to)
 
 </div>
 
@@ -25,12 +28,15 @@ Table of contents
 6. [Repository layout](#6-repository-layout)
 7. [Quick start](#7-quick-start)
 8. [Configuration](#8-configuration)
-9. [Simulator integration](#9-simulator-integration)
-10. [Testing and CI](#10-testing-and-ci)
-11. [7-day build plan](#11-7-day-build-plan)
-12. [Required deliverables map](#12-required-deliverables-map)
-13. [Reference material](#13-reference-material)
-14. [Rules we hold ourselves to](#14-rules-we-hold-ourselves-to)
+9. [The API](#9-the-api)
+10. [Simulator integration](#10-simulator-integration)
+11. [Testing and CI](#11-testing-and-ci)
+12. [Deployment and rollback](#12-deployment-and-rollback)
+13. [The demo](#13-the-demo)
+14. [7-day build plan](#14-7-day-build-plan)
+15. [Required deliverables map](#15-required-deliverables-map)
+16. [Reference material](#16-reference-material)
+17. [Rules we hold ourselves to](#17-rules-we-hold-ourselves-to)
 
 ---
 
@@ -54,9 +60,9 @@ Every number the dashboard shows comes from the live simulator through the
 backend. Nothing is fabricated, and nothing reaches the simulator without an
 explicit human approval.
 
-> **Status:** Day 6 of 7 complete. Day 7 is planned below.
+> **Status:** **v1.0.0 released.** Seven days, complete.
 > Submission deadline: **26 November 2026**.
-> Latest report: [`docs/progress/day6.md`](docs/progress/day6.md)
+> Final report: [`docs/progress/day7.md`](docs/progress/day7.md)
 
 ---
 
@@ -275,7 +281,7 @@ service here has a **memory limit**, a **CPU limit** and **log rotation**,
 and the three observability services sit behind a profile:
 
 ```bash
-docker compose up -d --wait                                       # the platform: 4 containers, ~280 MB
+docker compose up -d --wait                                       # the platform: 4 containers, ~380 MB
 docker compose --profile core --profile monitoring up -d --wait   # + Prometheus, Grafana, node-exporter
 ```
 
@@ -286,8 +292,8 @@ docker compose --profile monitoring up -d --wait
 ```
 
 The whole stack is capped at **1.5 GB** of memory in total, and measures
-**~417 MB** in use. `COMPOSE_PROFILES=core` lives in `.env`, so a plain
-`docker compose up` starts the platform alone.
+**~380 MB** in use for the core profile. `COMPOSE_PROFILES=core` lives in
+`.env`, so a plain `docker compose up` starts the platform alone.
 
 If the machine is already struggling, `scripts/stack_guard.sh` is the
 one-stop shop:
@@ -376,7 +382,74 @@ any backend address.
 
 ---
 
-## 9. Simulator integration
+## 9. The API
+
+Every route the backend serves. The interactive reference is at
+`http://localhost:8001/docs`.
+
+### Operational
+
+| Method | Path | What it does |
+|---|---|---|
+| `GET` | `/health` | **Readiness.** 200 only when the backend, the simulator and the database are all ok; 503 otherwise. |
+| `GET` | `/ready` | Liveness — the process is up. |
+| `GET` | `/metrics` | The Prometheus exposition format. |
+
+### The network
+
+| Method | Path | What it does |
+|---|---|---|
+| `GET` | `/api/state` | The whole network in one document: the instance, the stations, the depots, the routes, the events, the metrics. |
+| `GET` | `/api/stations` | Every station with its inventory, capacity and status. |
+| `GET` | `/api/depots` | Every depot with its stock and dispatch allowance. |
+| `GET` | `/api/routes` | Every route with its transit time, limit and status. |
+| `GET` | `/api/events` | The active crises. |
+| `GET` | `/api/supply-arrivals` | The incoming shipments. |
+| `GET` | `/api/allocations` | The allocation mirror. |
+| `GET` | `/api/history/{station_id}` | The demand history for one station. |
+
+### The intelligence
+
+| Method | Path | What it does |
+|---|---|---|
+| `GET` | `/api/risk` | Every risk assessment, with the signals behind each score. |
+| `GET` | `/api/alerts` | The alert ledger. |
+| `GET` | `/api/forecast` | The demand forecast with its confidence band. |
+| `GET` | `/api/anomalies` | The detected anomalies. |
+| `GET` | `/api/model-status` | Which model is active, how well it has done, and whether it is trusted. |
+| `POST` | `/api/model/train` | Retrain the learned model now. |
+| `POST` | `/api/model/kill-switch` | Turn the learned model off — the platform falls back to the rule-based predictor. |
+| `POST` | `/api/model/fault` | Inject a prediction fault, to prove the fallback works. |
+
+### The decisions
+
+| Method | Path | What it does |
+|---|---|---|
+| `GET` | `/api/recommendations` | The proposals. Filterable by status and station; paged. |
+| `GET` | `/api/recommendations/{id}` | One proposal, in full. |
+| `POST` | `/api/recommendations/propose` | Ask for a fresh set of proposals. |
+| `POST` | `/api/recommendations/{id}/simulate` | The what-if preview. **Writes nothing.** |
+| `POST` | `/api/recommendations/{id}/approve` | Approve, and send it to the simulator. |
+| `POST` | `/api/recommendations/{id}/reject` | Reject, and record why. |
+| `GET` | `/api/decisions` | The current decision counters and settings. |
+| `GET` | `/api/decision-settings` | The auto-mode state and the page size. |
+| `POST` | `/api/decision-settings` | Change the auto-mode state and the page size. |
+| `GET` | `/api/decision-history` | Every decision, with its outcome. |
+| `GET` | `/api/audit` | The searchable audit trail over three tables. |
+
+### The simulation and the health
+
+| Method | Path | What it does |
+|---|---|---|
+| `GET` | `/api/simulation` | The simulator's clock, its state and the active events. |
+| `POST` | `/api/simulation/{action}` | `run`, `pause`, `toggle`, `step`, `reset` — the same five the simulator's own admin console has. |
+| `POST` | `/api/simulation/crisis` | Inject a crisis: a demand spike, a shipment delay, a depot constraint, a route disruption. |
+| `GET` | `/api/service-health` | Every dependency, the p95 latency, the error rate, the fallback state. |
+| `POST` | `/admin/reset` | Put the platform back to a known state: clears the working set, the counters, any injected fault, the kill-switch and the cached world. |
+
+---
+
+## 10. Simulator integration
 
 `backend/app/simulator_client.py` covers the entire documented API surface:
 
@@ -464,11 +537,11 @@ The same procedure is exercised end-to-end by the connection-pool scenario in
 
 ---
 
-## 10. Testing and CI
+## 11. Testing and CI
 
 ```bash
 cd backend
-.venv/bin/python -m pytest -q       # 317 tests
+.venv/bin/python -m pytest -q       # 583 tests
 .venv/bin/ruff check .
 .venv/bin/ruff format --check .
 ```
@@ -492,8 +565,10 @@ pytest tests/ -m integration        # checks against the live simulator
 It resolves target URLs from the environment first, then `.env`, then the
 committed defaults, so it follows a local port remapping.
 
-**Current results:** 317 backend unit tests, 22 Vitest component tests and 12
-Playwright end-to-end tests, all passing; lint clean; CI green.
+**Current results:** 583 backend unit tests, 22 Vitest component tests and 12
+Playwright end-to-end tests, all passing; lint clean; CI green; **85 %
+coverage** overall, with every one of the seven modules the brief names
+above 93 %.
 
 GitHub Actions runs on every push to `main`: ruff lint and format check, pytest
 with a JUnit report, frontend typecheck, unit tests and build, Playwright
@@ -503,7 +578,7 @@ simulator and Postgres, and a `docker compose config` validation.
 
 ---
 
-## 11. 7-day build plan
+## 14. 7-day build plan
 
 Progress is logged daily in `docs/progress/dayN.md`. Each day ends with a push
 to `main` and an update to the company.
@@ -625,15 +700,16 @@ dashboard is served by `docker compose up` on `:5173`. — **Proven live**; see
 * Prometheus and Grafana provisioned as code: Application, System, Intelligence,
   Integration and Overview dashboards, plus 21 alert rules in 4 groups — six of
   them verified by **firing** them, not by reading them
-* The stack now fits a shared machine: **417 MB in use** against a hard 1.5 GB
+* The stack now fits a shared machine: **380 MB in use** against a hard 1.5 GB
   budget, every service with a memory limit, a CPU limit and log rotation,
   cAdvisor replaced by node-exporter, and the observability half behind a
   profile — see [`docs/progress/day6.md`](docs/progress/day6.md)
 * Circuit breaker, timeouts, malformed-data rejection with alert, ML kill
   switch, cached degraded mode, graceful shutdown, compose health checks
-* `scripts/crisis_drill.py`: baseline, demand spike, shipment delay, depot
-  constraint, route disruption, combined crisis and all five fault types;
-  results in `docs/resilience-report.md` — **14 of 14 recovered automatically**
+* `scripts/crisis_drill.py`: baseline, the six crises, the combined crisis,
+  all five fault types, the simulator's connection-pool exhaustion, a stopped
+  database and the prediction layer in three shapes;
+  results in `docs/resilience-report.md` — **17 of 17 recovered automatically**
 * Load tests on the dashboard API, the recommendation API and an end-to-end
   decision request; report in `docs/load-test-report.md`, with one bottleneck fix
   and before/after numbers — **p99 30 030 ms → 286 ms**, and the container
@@ -641,13 +717,13 @@ dashboard is served by `docker compose up` on `:5173`. — **Proven live**; see
 * Searchable audit, decision and event logs — `GET /api/audit` over three
   tables, and `scripts/search_logs.py` over the structured JSON logs
 
-**Verified:** 14 of 14 crisis, fault and dependency scenarios recovered
+**Verified:** 17 of 17 crisis, fault and dependency scenarios recovered
 automatically; the p99 of the dashboard read path went from 30 030 ms to
-286 ms once the prediction-error aggregate moved into SQL; 359 backend tests,
+286 ms once the prediction-error aggregate moved into SQL; 382 backend tests,
 22 Vitest tests, all passing. — **Proven live**; see
 [`docs/progress/day6.md`](docs/progress/day6.md).
 
-### Day 7 — CI/CD, tests, docs, demo prep, release *(planned)*
+### Day 7 — CI/CD, tests, docs, demo prep, release *(done)*
 
 * Fresh-clone test: the README followed exactly, one command plus a `.env` copy
 * CI/CD: lint, backend tests, frontend tests and build, docker build, compose
@@ -660,6 +736,15 @@ automatically; the p99 of the dashboard read path went from 30 030 ms to
 * Timed full demo dry run and UI polish
 * Tag `v1.0.0`
 
+**Verified:** the demo dry run executes every command in the demo, in order,
+against the running stack, and checks that each one produced what the demo
+claims — **five consecutive clean runs**, 32 to 43 seconds each. The day
+found three real bugs, including one where the platform served the
+**previous run's numbers as if they were current** after the world was
+reset; it now answers 503 instead. 583 backend tests, 22 Vitest, 12
+Playwright, all passing; **85 %** coverage. — **Proven live**; see
+[`docs/progress/day7.md`](docs/progress/day7.md).
+
 ### Scope-cut order if time runs short
 
 1. Auto-mode
@@ -670,7 +755,7 @@ Never cut: the load test, the resilience report, or the fresh-clone test.
 
 ---
 
-## 12. Required deliverables map
+## 15. Required deliverables map
 
 | # | Deliverable | Where it lives | Status |
 |---|---|---|---|
@@ -683,13 +768,13 @@ Never cut: the load test, the resilience report, or the fresh-clone test.
 | 6 | Architecture diagram | [`docs/assets/architecture.png`](docs/assets/architecture.png), §3 | **Done** — final Day 7 |
 | 7 | Deployment | `docker-compose.yml`, `.github/workflows/ci.yml` | Compose done, CI/CD final Day 7 |
 | 8 | Observability evidence | Grafana dashboards, `/metrics`, JSON logs | **Done** (Day 6) — 5 provisioned dashboards, 21 alert rules (6 fired and watched), 4 screenshots |
-| 9 | Resilience demonstration | [`docs/fault-tests.md`](docs/fault-tests.md), [`docs/resilience-report.md`](docs/resilience-report.md) | **Done** (Day 6) — 14 of 14 scenarios recovered automatically |
+| 9 | Resilience demonstration | [`docs/fault-tests.md`](docs/fault-tests.md), [`docs/resilience-report.md`](docs/resilience-report.md) | **Done** (Day 6) — 17 of 17 scenarios recovered automatically |
 | 10 | Load-test evidence | [`docs/load-test-report.md`](docs/load-test-report.md) | **Done** (Day 6) — 3 workloads, p99 30 030 ms → 286 ms |
 | 11 | Final demo | `docs/demo-script.md` | Day 7 |
 
 ---
 
-## 13. Reference material
+## 16. Reference material
 
 * [`docs/reference/BUP_Fuel_Supply_Simulator_Integration_Guide_Final.pdf`](docs/reference/BUP_Fuel_Supply_Simulator_Integration_Guide_Final.pdf) — **the API source of truth**
 * [`docs/reference/BUP_CSE_FEST_2026_Participant_Facing_Hackathon_Draft.pdf`](docs/reference/BUP_CSE_FEST_2026_Participant_Facing_Hackathon_Draft.pdf) — the brief and the deliverables
@@ -698,7 +783,7 @@ Never cut: the load test, the resilience report, or the fresh-clone test.
 
 ---
 
-## 14. Rules we hold ourselves to
+## 17. Rules we hold ourselves to
 
 * Operate **only** against the simulation environment: no real fuel
   infrastructure, no real credentials, no real dispatches.

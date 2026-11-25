@@ -103,6 +103,9 @@ class _FakeClient:
         self.stream_events: list[Any] = []
         self.stream_error: Exception | None = None
         self.stream_ends_after: int | None = None
+        #: The world's tick. Lowering it is what a simulator reset looks
+        #: like from the platform's side.
+        self.tick = 7
 
     def reset_stale(self) -> None:
         self.stale = False
@@ -137,7 +140,7 @@ class _FakeClient:
                 "scenario_version": "1.0",
                 "seed": 1,
                 "sim_time": "2026-01-01T00:00:00+00:00",
-                "tick": 7,
+                "tick": self.tick,
                 "tick_minutes": 15,
                 "status": "RUNNING",
             }
@@ -881,6 +884,55 @@ async def test_an_empty_store_keeps_the_stored_history(service, client, stored_h
     await service.ingest_demand_history()
 
     assert stored_history["truncated"] is False
+
+
+async def test_forgetting_the_previous_world_drops_the_cached_state(service, cache) -> None:
+    """A reset must not leave the old world in the cache.
+
+    The simulator's clock went back to zero, so the cached snapshot is a
+    world that has ended. Serving it as fresh would be the platform
+    presenting the previous run's numbers as the current state.
+    """
+    await service.run_sync_cycle()
+    assert cache.has_state is True
+
+    await service.forget_the_previous_world()
+
+    assert cache.has_state is False
+    assert cache.state is None
+
+
+async def test_forgetting_the_previous_world_resets_the_stream_tracker(service) -> None:
+    """The stream's tick tracker is reset with the cache.
+
+    The event stream carries the *old* world's ticks. A tracker left at
+    tick 900 would call the new world's stream permanently stale, and the
+    platform would drop a healthy stream every few seconds — for ever.
+    """
+    service._sse_highest_tick = 900
+
+    await service.forget_the_previous_world()
+
+    assert service._sse_highest_tick == 0
+    assert service._sse_behind_since is None
+
+
+async def test_a_rewound_world_resets_the_stream_tracker(service, client, cache) -> None:
+    """A snapshot from a rewound clock is noticed by the sync cycle.
+
+    The platform can be reset from outside — the simulator's own admin
+    console, or the organizers' scripts — and the stream's tick tracker
+    has to follow the world back to zero.
+    """
+    await service.run_sync_cycle()
+    service._sse_highest_tick = 900
+
+    # The world went backwards: the simulator was reset.
+    client.tick = 0
+    await service.run_sync_cycle()
+
+    assert service._sse_highest_tick == 0
+    assert cache.rewound is True
 
 
 # -- sync coalescing --------------------------------------------------------

@@ -37,7 +37,7 @@ SIMULATOR_URL="${SIMULATOR_URL:-http://localhost:${SIMULATOR_PORT}}"
 
 RUN_AFTER=1
 WAIT_FOR_HISTORY=0
-HISTORY_TICKS=8
+HISTORY_TICKS=12
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -81,7 +81,30 @@ curl -fsS --max-time 5 "${SIMULATOR_URL}/v1/health" > /dev/null 2>&1 || {
 
 echo "the backend and the simulator are both up"
 
-# --- 1. reset the simulation ----------------------------------------------
+# --- 1. reset the platform's own state -------------------------------------
+
+say "Resetting the platform's own state"
+
+# This clears the decision engine's in-memory working set, the counters,
+# any injected prediction fault and the kill-switch.
+#
+# The in-memory set is the important one. A reset that only cleared
+# Postgres would leave the previous run's proposals in memory, and every
+# one of them would fail to approve — they were planned for a world that
+# no longer exists, and the simulator refuses them with *"the depot's
+# dispatch allowance for this tick is used up"*.
+#
+# An injected fault survives a simulator reset, because it lives in the
+# backend, not in the world. Without this step the next demo starts with
+# the prediction layer already broken, and the "the model recovers on its
+# own" moment at the end of the story never happens.
+curl -fsS -X POST "${BACKEND_URL}/admin/reset" \
+    | jq -c '{recommendations_cleared, kill_switch, prediction_fault}' 2>/dev/null \
+    || curl -fsS -X POST "${BACKEND_URL}/admin/reset" > /dev/null
+
+echo "the platform's proposals, counters and fault state are clear"
+
+# --- 2. reset the simulation ----------------------------------------------
 
 say "Resetting the simulation"
 
@@ -90,7 +113,7 @@ say "Resetting the simulation"
 curl -fsS -X POST "${SIMULATOR_URL}/admin/reset" | head -c 200
 echo
 
-# --- 2. clear the platform's own records ----------------------------------
+# --- 3. clear the platform's own records ----------------------------------
 
 say "Clearing the platform's decisions and alerts"
 
@@ -123,24 +146,6 @@ else
     echo "the database is not running — skipping the truncate"
 fi
 
-# --- 3. clear any injected fault ------------------------------------------
-
-say "Clearing any injected fault"
-
-# An injected fault survives a simulator reset, because it lives in the
-# backend, not in the world. Without this step the next demo starts with
-# the prediction layer already broken, and the "the model recovers on its
-# own" moment at the end of the story never happens.
-curl -fsS --max-time 5 -X POST "${BACKEND_URL}/api/model/fault" \
-    -H 'Content-Type: application/json' -d '{"fault":null}' > /dev/null 2>&1 || true
-
-# The kill-switch is a decision an operator made; the reset puts it back
-# to the default so the demo starts with the model in use.
-curl -fsS --max-time 5 -X POST "${BACKEND_URL}/api/model/kill-switch" \
-    -H 'Content-Type: application/json' -d '{"enabled":false}' > /dev/null 2>&1 || true
-
-echo "the prediction layer is back to normal"
-
 # --- 4. start the clock ----------------------------------------------------
 
 if [ "$RUN_AFTER" -eq 1 ]; then
@@ -172,6 +177,40 @@ if [ "$WAIT_FOR_HISTORY" -eq 1 ]; then
     done
 
     echo "the world is at tick ${NOW}"
+
+    # The platform's own cache has to catch up with the world before the
+    # demo starts talking about numbers, or the dashboard shows the
+    # previous run's state for a few seconds.
+    #
+    # After a reset the platform **drops** the cached snapshot of the world
+    # that just ended — it will not serve a run's numbers as if they were
+    # current — so `/api/state` answers 503 until the next sync cycle
+    # fetches the new world. The wait therefore has to tolerate the 503
+    # and look for the *new* world's tick.
+    #
+    # The wait is on the *simulator's* tick, not on the platform's cached
+    # one: a wait keyed on the cache would return immediately and then
+    # assert against stale data.
+    CACHED=""
+    for _ in $(seq 1 30); do
+        # ``curl -f`` makes a 503 an error, so the status code is checked
+        # instead and the body is parsed only when there is one.
+        BODY=$(curl -s --max-time 5 "${BACKEND_URL}/api/state" 2>/dev/null || true)
+        CACHED=$(printf '%s' "${BODY:-}" \
+            | jq -r '.instance.tick // empty' 2>/dev/null || true)
+        if [ -n "$CACHED" ] && [ "$CACHED" -ge "$NOW" ]; then
+            break
+        fi
+        sleep 1
+    done
+    echo "the platform is at tick ${CACHED:-unknown}"
+
+    # Train the model on what the world has just produced, so the demo
+    # starts with the learned model in use rather than with the
+    # rule-based fallback.
+    say "Training the model on the history so far"
+    curl -fsS --max-time 30 -X POST "${BACKEND_URL}/api/model/train" \
+        | jq -c '{trained, training_rows, validation_mae}' 2>/dev/null || true
 fi
 
 say "The demo is ready"

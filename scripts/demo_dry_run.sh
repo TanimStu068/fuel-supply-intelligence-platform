@@ -55,24 +55,36 @@ fi
 # --- 1. normal operations --------------------------------------------------
 
 say "Normal operations — read the state"
-STATE=$(curl -fsS --max-time 10 "$BACKEND/api/state")
-if [ -n "$STATE" ]; then
+
+# Right after a reset the platform **drops** the cached snapshot of the
+# world that just ended, so `/api/state` answers 503 until the next sync
+# cycle fetches the new one. That is the platform being honest rather
+# than serving the previous run's numbers as current, so the wait below
+# is part of the story and not a workaround.
+STATE=""
+for _ in $(seq 1 30); do
+    BODY=$(curl -s --max-time 10 "$BACKEND/api/state" 2>/dev/null || true)
+    STATE=$(printf '%s' "${BODY:-}")
+    [ -n "$STATE" ] && echo "$STATE" | jq -e '.instance.tick' > /dev/null 2>&1 && break
+    sleep 1
+done
+if [ -n "$STATE" ] && echo "$STATE" | jq -e '.instance.tick' > /dev/null 2>&1; then
     ok "$(echo "$STATE" | jq -r '"tick \(.instance.tick), status \(.instance.status)"')"
     ok "service level $(echo "$STATE" | jq -r '.metrics.service_level // "n/a"')"
 else
     fail "the state did not come back"
 fi
 
-# The backend's sync interval is 15 seconds, so right after a reset the
-# cached state is still the previous world's for a moment. The demo waits
-# for the world to catch up before it starts talking about numbers.
+# The backend's sync interval is 15 seconds, so the platform may still be a
+# little behind the simulator. The demo waits for the world to catch up
+# before it starts talking about numbers.
 say "Waiting for the backend's sync to catch up"
 for _ in $(seq 1 20); do
     LIVE=$(curl -fsS --max-time 10 "$SIM/v1/instance" | jq -r '.tick' 2>/dev/null || echo 0)
     CACHED=$(echo "$STATE" | jq -r '.instance.tick' 2>/dev/null || echo 0)
     [ "${LIVE:-0}" -le $((CACHED + 2)) ] && break
     sleep 1
-    STATE=$(curl -fsS --max-time 10 "$BACKEND/api/state")
+    STATE=$(curl -s --max-time 10 "$BACKEND/api/state" 2>/dev/null || true)
 done
 ok "the backend is at tick $(echo "$STATE" | jq -r '.instance.tick'), the simulator at $LIVE"
 
@@ -118,12 +130,26 @@ done
 # --- 5. a shortage is predicted --------------------------------------------
 
 say "A shortage is predicted"
-CRITICAL=$(curl -fsS --max-time 10 "$BACKEND/api/risk" 2>/dev/null \
-    | jq -r '[.risks[]? | select(.risk_level=="CRITICAL")] | length' 2>/dev/null || echo 0)
+
+# The risk level moves over a tick or two, not the instant the anomaly is
+# raised: the platform has to forecast forward from the spiked demand and
+# see how fast the tank drains. The demo script says "wait about ten
+# seconds" for exactly this reason, so the check waits too — a single
+# immediate read would be a race the platform does not lose, but does not
+# always win either.
+CRITICAL=0
+for _ in $(seq 1 20); do
+    CRITICAL=$(curl -fsS --max-time 10 "$BACKEND/api/risk" 2>/dev/null \
+        | jq -r '[.risks[]? | select(.risk_level=="CRITICAL")] | length' 2>/dev/null || echo 0)
+    if [ "${CRITICAL:-0}" -gt 0 ]; then
+        break
+    fi
+    sleep 1
+done
 if [ "${CRITICAL:-0}" -gt 0 ]; then
     ok "$CRITICAL critical risk assessment(s)"
 else
-    fail "no critical risk assessment"
+    fail "no critical risk assessment within 20 seconds"
 fi
 
 FORECAST=$(curl -fsS --max-time 10 \
@@ -304,6 +330,21 @@ fi
 say "Operations continue — repair the model"
 curl -fsS --max-time 10 -X POST "$BACKEND/api/model/fault" \
     -H 'Content-Type: application/json' -d '{"fault":null}' > /dev/null 2>&1
+
+# The model has to **earn** its way back: it is only used when it beats
+# the rule-based baseline on a held-out split, and that score comes from a
+# training run. The trainer's own schedule is five minutes, so the demo
+# asks for the retrain rather than waiting for it — the same control an
+# operator has, and the demo script says out loud that "the model
+# retrained".
+TRAIN=$(curl -fsS --max-time 60 -X POST "$BACKEND/api/model/train" 2>/dev/null || echo '{}')
+TRAINED=$(echo "$TRAIN" | jq -r '.trained // false' 2>/dev/null || echo false)
+if [ "$TRAINED" = "true" ]; then
+    ok "the model retrained on $(echo "$TRAIN" | jq -r '.training_rows') rows"
+else
+    fail "the model did not retrain"
+fi
+
 RECOVERED=0
 for _ in $(seq 1 40); do
     RISK=$(curl -fsS --max-time 10 "$BACKEND/api/risk" 2>/dev/null || echo '{}')

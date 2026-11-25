@@ -543,3 +543,68 @@ async def test_a_failing_repository_does_not_break_the_decision() -> None:
     await service.persist_all()
 
     assert service.recommendation_count == 2
+
+
+# -- the reset ---------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_the_reset_clears_the_working_set() -> None:
+    """A reset must empty the proposals, or the next run inherits them.
+
+    This was a real defect. The reset cleared Postgres but left the
+    in-memory working set alone, so the previous run's proposals survived.
+    Every one of them then failed to approve — they were planned for a
+    world that no longer existed, and the simulator refused them with
+    "the depot's dispatch allowance for this tick is used up".
+    """
+    service = await _service()
+
+    assert service.recommendation_count > 0
+
+    cleared = service.reset()
+
+    assert cleared > 0
+    assert service.recommendation_count == 0
+    assert service.list_recommendations() == []
+
+
+@pytest.mark.asyncio
+async def test_the_reset_clears_the_counters() -> None:
+    """The counters are part of the state a reset puts back."""
+    service = await _service()
+
+    assert service.counters["proposed"] > 0
+
+    service.reset()
+
+    assert service.counters["proposed"] == 0
+    assert service.counters["approved"] == 0
+
+
+@pytest.mark.asyncio
+async def test_the_reset_clears_the_fallback_reason() -> None:
+    """A reset must not leave the platform claiming it is degraded."""
+    service = await _service()
+    service.set_fallback_reason("the intelligence layer is unavailable")
+
+    assert service.fallback_reason is not None
+
+    service.reset()
+
+    assert service.fallback_reason is None
+
+
+@pytest.mark.asyncio
+async def test_the_reset_leaves_the_auto_mode_alone() -> None:
+    """The auto-mode is an operator's setting, not the demo's.
+
+    Turning it on is a deliberate act with a safety consequence, and a
+    demo reset should not silently undo it — but it should also not
+    *enable* it.
+    """
+    service = await _service()
+
+    service.reset()
+
+    assert service.auto_mode is False
