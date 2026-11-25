@@ -459,3 +459,88 @@ curl -s http://localhost:8001/health | jq
 
 Nothing else is planned. The build is done; what is left is proving it
 works from nothing, once more, on a clean machine.
+
+---
+
+## Addendum — the fresh-clone test, run the same evening
+
+There was time, so the fresh-clone test was run straight away, against
+the tagged commit — not the working tree.
+
+```bash
+git clone /home/tanim-mahmud/Desktop/poridhi/fuel-supply-intelligence-platform /tmp/clone-proof
+cd /tmp/clone-proof
+git log --oneline -1
+# 426b574 (HEAD -> main, tag: v1.0.0, origin/main, origin/HEAD)
+#   fix(day7): stop the platform serving a world that has ended
+
+cp .env.example .env
+docker compose up --build -d --wait
+```
+
+**The stack came up in 15 seconds**, all four containers healthy:
+
+```text
+Container fuel-simulator    Healthy
+Container fuel-postgres     Healthy
+Container fuel-backend      Healthy
+Container fuel-frontend     Healthy
+
+real  0m15.451s
+```
+
+```json
+{
+  "status": "ok",
+  "components": {
+    "backend":   {"status": "ok"},
+    "simulator": {"status": "ok", "database": "ok", "simulation": {"status": "RUNNING", "tick": 2562}},
+    "database":  {"status": "ok"}
+  }
+}
+```
+
+The state had a whole network in it — 4 stations, 2 depots, 6 routes,
+`degraded: false`, age 1.11 s — and the dashboard answered 200.
+
+**The demo dry run passed on the fresh clone, twice:**
+
+| Run | Time | Result |
+|---|---|---|
+| 1 | 42 s | every step produced what the demo script claims |
+| 2 | 30 s | every step produced what the demo script claims |
+
+**And the bug of this day is fixed there too**, which is the part that
+matters — a fix that only works in the working tree is not a fix:
+
+```text
+=== BEFORE ===
+{"tick":302}
+{"tick":288,"degraded":false,"age_seconds":2.183}
+
+=== POST /admin/reset ===
+{"tick":0,"status":"PAUSED"}
+
+=== IMMEDIATELY after ===
+HTTP 503
+{"detail":"no simulator state available yet"}
+```
+
+The platform refuses to serve the world that just ended, and it is
+serving the new world **one second** later.
+
+The clone's containers, all inside their limits:
+
+| Container | Memory | Limit |
+|---|---|---|
+| `fuel-frontend` | 16.96 MiB | 64 MB |
+| `fuel-backend` | 153 MiB | 384 MB |
+| `fuel-postgres` | 98.01 MiB | 256 MB |
+| `fuel-simulator` | 76.3 MiB | 384 MB |
+
+**344 MB for the four core containers**, against a 1.1 GB budget, on a
+machine with 2.5 GB available.
+
+The clone was torn down afterwards and the working tree's stack was
+brought back up.
+
