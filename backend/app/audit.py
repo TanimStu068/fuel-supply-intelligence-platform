@@ -23,6 +23,16 @@ The search is deliberately simple and honest:
 * **A time window**, because an audit question is almost always about a
   period.
 
+**The counting happens in the database.** The first version of this module
+read every matching row into Python and counted it there. The trail holds
+tens of thousands of rows and a hundred megabytes of JSON, so that took
+eighteen seconds and returned a page of two hundred — a search that an
+operator gives up on. The same lesson the load test taught about the
+prediction-error aggregate: the data is already in Postgres, so Postgres
+should do the counting. The filters are pushed down into SQL, the counts
+come back as aggregates, and only the rows that are actually returned
+cross into the application.
+
 Loki is deliberately not used. The audit trail is *already* in Postgres,
 and putting a second store in front of it would mean two things that can
 disagree. Structured JSON logs cover the "search the raw log lines" half
@@ -36,10 +46,14 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import or_, select
+from sqlalchemy import cast, func, or_, select
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .models import Alert, DomainEventRow, Recommendation
+
+#: The largest page the endpoint will serve.
+MAX_LIMIT = 1000
 
 
 @dataclass(slots=True)
@@ -88,7 +102,24 @@ def _loads(raw: str | None) -> dict[str, Any]:
     return parsed if isinstance(parsed, dict) else {"value": parsed}
 
 
-def _decision_entry(row: Recommendation) -> AuditEntry:
+def _like_pattern(needle: str) -> str:
+    """Escape a full-text needle so it is matched literally.
+
+    ``LIKE`` treats ``%`` and ``_`` as wildcards. A search for "100%"
+    must find the percent sign and not match a hundred characters, so the
+    needle is escaped and the escape character is declared in the query.
+    """
+    escaped = needle.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return f"%{escaped}%"
+
+
+def _text_clause(columns: tuple[Any, ...], needle: str) -> Any:
+    """A case-insensitive full-text clause over the given columns."""
+    pattern = _like_pattern(needle)
+    return or_(*(column.ilike(pattern, escape="\\") for column in columns))
+
+
+def _decision_entry(row: Any) -> AuditEntry:
     """A recommendation (an allocation decision) as an audit entry.
 
     The ``kind`` of a decision is its risk level, which is what an
@@ -121,7 +152,7 @@ def _decision_entry(row: Recommendation) -> AuditEntry:
     )
 
 
-def _event_entry(row: DomainEventRow) -> AuditEntry:
+def _event_entry(row: Any) -> AuditEntry:
     """A domain event as an audit entry."""
     parameters = _loads(row.parameters)
     return AuditEntry(
@@ -136,7 +167,7 @@ def _event_entry(row: DomainEventRow) -> AuditEntry:
     )
 
 
-def _alert_entry(row: Alert) -> AuditEntry:
+def _alert_entry(row: Any) -> AuditEntry:
     """An alert as an audit entry."""
     payload = _loads(row.payload)
     return AuditEntry(
@@ -151,6 +182,175 @@ def _alert_entry(row: Alert) -> AuditEntry:
     )
 
 
+# -- the three trails --------------------------------------------------------
+#
+# Each trail is described once, and the description drives both the page
+# query and the count query. That is what keeps the counts and the page
+# describing the *same* set of rows: a filter that is pushed into the page
+# query but not into the count query would report a total that does not
+# match what was returned.
+
+
+@dataclass(frozen=True)
+class _Trail:
+    """How one audit trail is queried."""
+
+    source: str
+    #: The table the trail lives in.
+    table: Any
+    #: The column holding the row's timestamp.
+    time_column: Any
+    #: The column holding the trail's own "kind".
+    kind_column: Any
+    #: The column holding the trail's own "status".
+    status_column: Any
+    #: The column holding the entity, if the trail has one as a column.
+    entity_column: Any
+    #: The columns a full-text search reads.
+    text_columns: tuple[Any, ...]
+    #: The columns the page query selects.
+    page_columns: tuple[Any, ...]
+    #: How a row becomes an entry.
+    to_entry: Any
+
+
+_DECISIONS = _Trail(
+    source="decision",
+    table=Recommendation.__table__,
+    time_column=Recommendation.created_at,
+    kind_column=Recommendation.risk_level,
+    status_column=Recommendation.status,
+    entity_column=Recommendation.station_id,
+    text_columns=(
+        Recommendation.rationale,
+        Recommendation.recommendation_id,
+        Recommendation.station_id,
+        Recommendation.fuel_type,
+        Recommendation.status,
+        Recommendation.risk_level,
+        Recommendation.inputs_snapshot,
+    ),
+    page_columns=(
+        Recommendation.id,
+        Recommendation.created_at,
+        Recommendation.recommendation_id,
+        Recommendation.station_id,
+        Recommendation.fuel_type,
+        Recommendation.source_depot_id,
+        Recommendation.route_id,
+        Recommendation.quantity,
+        Recommendation.status,
+        Recommendation.risk_level,
+        Recommendation.confidence,
+        Recommendation.needs_human_review,
+        Recommendation.used_fallback_policy,
+        Recommendation.decided_by,
+        Recommendation.sim_tick,
+        Recommendation.rationale,
+        Recommendation.inputs_snapshot,
+    ),
+    to_entry=_decision_entry,
+)
+
+_EVENTS = _Trail(
+    source="event",
+    table=DomainEventRow.__table__,
+    time_column=DomainEventRow.captured_at,
+    kind_column=DomainEventRow.type,
+    status_column=DomainEventRow.status,
+    # An event's entity lives inside its JSON parameters, so the filter
+    # reaches into the document rather than into a column.
+    entity_column=cast(DomainEventRow.parameters, JSONB).op("->>")("entity_id"),
+    text_columns=(
+        DomainEventRow.type,
+        DomainEventRow.status,
+        DomainEventRow.parameters,
+    ),
+    page_columns=(
+        DomainEventRow.id,
+        DomainEventRow.captured_at,
+        DomainEventRow.type,
+        DomainEventRow.start_tick,
+        DomainEventRow.end_tick,
+        DomainEventRow.status,
+        DomainEventRow.parameters,
+    ),
+    to_entry=_event_entry,
+)
+
+_ALERTS = _Trail(
+    source="alert",
+    table=Alert.__table__,
+    time_column=Alert.created_at,
+    kind_column=Alert.kind,
+    status_column=Alert.severity,
+    entity_column=Alert.entity_id,
+    text_columns=(
+        Alert.message,
+        Alert.kind,
+        Alert.entity_id,
+        Alert.payload,
+    ),
+    page_columns=(
+        Alert.id,
+        Alert.created_at,
+        Alert.kind,
+        Alert.severity,
+        Alert.entity_type,
+        Alert.entity_id,
+        Alert.sim_tick,
+        Alert.message,
+        Alert.payload,
+    ),
+    to_entry=_alert_entry,
+)
+
+#: Every trail, keyed by the name the API uses for it.
+TRAILS: dict[str, _Trail] = {
+    _DECISIONS.source: _DECISIONS,
+    _EVENTS.source: _EVENTS,
+    _ALERTS.source: _ALERTS,
+}
+
+
+def _clauses(
+    trail: _Trail,
+    *,
+    kinds: list[str] | None,
+    statuses: list[str] | None,
+    entity_id: str | None,
+    text: str | None,
+    since: datetime | None,
+    until: datetime | None,
+) -> list[Any]:
+    """The WHERE clauses for one trail.
+
+    Every filter the API offers is pushed down here, so the database does
+    the filtering and the application never sees a row that does not
+    match. The same filters are applied again in Python after the merge —
+    see :func:`read_audit_entries` — because ``status`` means a decision's
+    outcome in one trail and an alert's severity in another.
+    """
+    clauses: list[Any] = []
+    if kinds:
+        clauses.append(trail.kind_column.in_(kinds))
+    if statuses:
+        # The comparison is case-insensitive on both sides: a decision's
+        # status is "submitted" and an alert's severity is "critical", and
+        # an operator types them in either case.
+        wanted = {status.upper() for status in statuses}
+        clauses.append(func.upper(trail.status_column).in_(wanted))
+    if entity_id:
+        clauses.append(trail.entity_column == entity_id)
+    if text:
+        clauses.append(_text_clause(trail.text_columns, text))
+    if since is not None:
+        clauses.append(trail.time_column >= since)
+    if until is not None:
+        clauses.append(trail.time_column <= until)
+    return clauses
+
+
 async def read_audit_entries(
     session: AsyncSession,
     *,
@@ -163,7 +363,7 @@ async def read_audit_entries(
     until: datetime | None = None,
     limit: int = 200,
 ) -> list[AuditEntry]:
-    """Read the unified audit stream.
+    """Read one page of the unified audit stream.
 
     The three trails are queried independently and merged in Python. That
     is the honest choice here: the tables have genuinely different shapes
@@ -175,86 +375,33 @@ async def read_audit_entries(
     *after* the merge, so a search over one source does not crowd out the
     other two.
     """
-    limit = max(1, min(limit, 1000))
-    wanted = set(sources) if sources else {"decision", "event", "alert"}
+    limit = max(1, min(limit, MAX_LIMIT))
+    wanted = set(sources) if sources else set(TRAILS)
 
     entries: list[AuditEntry] = []
 
-    if "decision" in wanted:
-        # The decision trail is the ``recommendations`` table — that is
-        # where the platform actually writes every allocation decision.
-        # (``decision_records`` exists in the schema but nothing writes
-        # it, so reading it would give an empty trail.)
-        query = select(Recommendation)
-        if kinds:
-            query = query.where(Recommendation.risk_level.in_(kinds))
-        if statuses:
-            query = query.where(Recommendation.status.in_(statuses))
-        if since is not None:
-            query = query.where(Recommendation.created_at >= since)
-        if until is not None:
-            query = query.where(Recommendation.created_at <= until)
-        if entity_id:
-            query = query.where(Recommendation.station_id == entity_id)
-        if text:
-            pattern = f"%{text.lower()}%"
-            query = query.where(
-                or_(
-                    Recommendation.rationale.ilike(pattern),
-                    Recommendation.recommendation_id.ilike(pattern),
-                    Recommendation.station_id.ilike(pattern),
-                    Recommendation.fuel_type.ilike(pattern),
-                    Recommendation.status.ilike(pattern),
-                    Recommendation.risk_level.ilike(pattern),
-                )
-            )
-        rows = (await session.execute(query)).scalars().all()
-        entries.extend(_decision_entry(row) for row in rows)
-
-    if "event" in wanted:
-        query = select(DomainEventRow)
-        if kinds:
-            query = query.where(DomainEventRow.type.in_(kinds))
-        if statuses:
-            query = query.where(DomainEventRow.status.in_(statuses))
-        if since is not None:
-            query = query.where(DomainEventRow.captured_at >= since)
-        if until is not None:
-            query = query.where(DomainEventRow.captured_at <= until)
-        if text:
-            pattern = f"%{text.lower()}%"
-            query = query.where(
-                or_(
-                    DomainEventRow.type.ilike(pattern),
-                    DomainEventRow.status.ilike(pattern),
-                )
-            )
-        rows = (await session.execute(query)).scalars().all()
-        entries.extend(_event_entry(row) for row in rows)
-
-    if "alert" in wanted:
-        query = select(Alert)
-        if kinds:
-            query = query.where(Alert.kind.in_(kinds))
-        if statuses:
-            query = query.where(Alert.severity.in_(statuses))
-        if since is not None:
-            query = query.where(Alert.created_at >= since)
-        if until is not None:
-            query = query.where(Alert.created_at <= until)
-        if entity_id:
-            query = query.where(Alert.entity_id == entity_id)
-        if text:
-            pattern = f"%{text.lower()}%"
-            query = query.where(
-                or_(
-                    Alert.message.ilike(pattern),
-                    Alert.kind.ilike(pattern),
-                    Alert.entity_id.ilike(pattern),
-                )
-            )
-        rows = (await session.execute(query)).scalars().all()
-        entries.extend(_alert_entry(row) for row in rows)
+    for source in wanted:
+        trail = TRAILS.get(source)
+        if trail is None:
+            continue
+        clauses = _clauses(
+            trail,
+            kinds=kinds,
+            statuses=statuses,
+            entity_id=entity_id,
+            text=text,
+            since=since,
+            until=until,
+        )
+        query = (
+            select(*trail.page_columns)
+            .select_from(trail.table)
+            .where(*clauses)
+            .order_by(trail.time_column.desc())
+            .limit(limit)
+        )
+        rows = (await session.execute(query)).all()
+        entries.extend(trail.to_entry(row) for row in rows)
 
     # The entity filter applies to every source, so it is applied after
     # the merge rather than in three different places.
@@ -298,19 +445,106 @@ async def read_audit_entries(
     # alerts for every decision, so a merged page was all alerts and the
     # decision trail was invisible even though it had thousands of rows.
     #
+    # The share is divided among the trails that actually have rows. A
+    # search that matched one trail and nothing else gets the whole
+    # page: splitting it three ways would answer "one thing matches"
+    # with a page of one for no reason.
+    #
     # This runs after every filter, so it only ever splits a set that
     # already matches the query.
-    per_source = max(1, limit // max(1, len(wanted)))
     by_source: dict[str, list[AuditEntry]] = {}
     for entry in entries:
         by_source.setdefault(entry.source, []).append(entry)
 
+    per_source = max(1, limit // max(1, len(by_source)))
     merged: list[AuditEntry] = []
     for source_entries in by_source.values():
         merged.extend(source_entries[:per_source])
 
     merged.sort(key=lambda entry: entry.at or datetime.min.replace(tzinfo=UTC), reverse=True)
     return merged
+
+
+async def summarise_audit_entries(
+    session: AsyncSession,
+    entries: list[AuditEntry] | None = None,
+    *,
+    sources: list[str] | None = None,
+    kinds: list[str] | None = None,
+    statuses: list[str] | None = None,
+    entity_id: str | None = None,
+    text: str | None = None,
+    since: datetime | None = None,
+    until: datetime | None = None,
+) -> dict[str, Any]:
+    """Summarise a search: how many, and broken down by facet.
+
+    The counts come from the database, not from the page. A page of two
+    hundred rows cannot tell an operator that there are twelve thousand
+    alerts behind them, and a summary that reports "200" for a trail of
+    twelve thousand is worse than no summary at all.
+
+    ``COUNT`` is grouped by kind and status, and the oldest and newest
+    moments are the minimum and maximum over those groups — so the
+    whole summary is three aggregate queries.
+    """
+    wanted = set(sources) if sources else set(TRAILS)
+
+    by_source: dict[str, int] = {}
+    by_kind: dict[str, int] = {}
+    by_status: dict[str, int] = {}
+    total = 0
+    oldest: datetime | None = None
+    newest: datetime | None = None
+
+    for source in wanted:
+        trail = TRAILS.get(source)
+        if trail is None:
+            continue
+        clauses = _clauses(
+            trail,
+            kinds=kinds,
+            statuses=statuses,
+            entity_id=entity_id,
+            text=text,
+            since=since,
+            until=until,
+        )
+        query = (
+            select(
+                trail.kind_column,
+                trail.status_column,
+                func.count(),
+                func.min(trail.time_column),
+                func.max(trail.time_column),
+            )
+            .select_from(trail.table)
+            .where(*clauses)
+            .group_by(trail.kind_column, trail.status_column)
+        )
+        rows = (await session.execute(query)).all()
+        if not rows:
+            continue
+        trail_total = 0
+        for kind, status, count, first, last in rows:
+            trail_total += int(count)
+            by_kind[kind] = by_kind.get(kind, 0) + int(count)
+            by_status[status] = by_status.get(status, 0) + int(count)
+            if first is not None:
+                oldest = first if oldest is None else min(oldest, _as_utc(first))
+            if last is not None:
+                newest = last if newest is None else max(newest, _as_utc(last))
+        by_source[source] = trail_total
+        total += trail_total
+
+    return {
+        "count": total,
+        "by_source": dict(sorted(by_source.items())),
+        "by_kind": dict(sorted(by_kind.items(), key=lambda item: -item[1])),
+        "by_status": dict(sorted(by_status.items())),
+        "newest": newest.isoformat() if newest else None,
+        "oldest": oldest.isoformat() if oldest else None,
+    }
 
 
 def _as_utc(moment: datetime) -> datetime:
@@ -350,27 +584,3 @@ def _searchable_text(entry: AuditEntry) -> str:
         json.dumps(entry.payload, default=str),
     ]
     return " ".join(parts)
-
-
-async def summarise_audit_entries(
-    session: AsyncSession,
-    entries: list[AuditEntry],
-) -> dict[str, Any]:
-    """Summarise a set of entries: how many, and broken down by facet."""
-    by_source: dict[str, int] = {}
-    by_kind: dict[str, int] = {}
-    by_status: dict[str, int] = {}
-
-    for entry in entries:
-        by_source[entry.source] = by_source.get(entry.source, 0) + 1
-        by_kind[entry.kind] = by_kind.get(entry.kind, 0) + 1
-        by_status[entry.status] = by_status.get(entry.status, 0) + 1
-
-    return {
-        "count": len(entries),
-        "by_source": dict(sorted(by_source.items())),
-        "by_kind": dict(sorted(by_kind.items(), key=lambda item: -item[1])),
-        "by_status": dict(sorted(by_status.items())),
-        "newest": entries[0].at.isoformat() if entries and entries[0].at else None,
-        "oldest": entries[-1].at.isoformat() if entries and entries[-1].at else None,
-    }

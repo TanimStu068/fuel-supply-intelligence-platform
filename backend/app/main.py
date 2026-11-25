@@ -1085,12 +1085,17 @@ async def search_audit(
 
     try:
         async with database.session() as session:
-            # The full match is read first, so the summary describes the
-            # whole result set rather than the page that is returned.
-            # Without this, a trail with 20,000 alerts and 300 decisions
-            # would report "300 decisions" as zero, because the newest
-            # page is all alerts.
-            everything = await read_audit_entries(
+            # The summary is counted **in the database**, and the page is
+            # a separate, bounded query.
+            #
+            # The first version read every matching row into Python to
+            # count it — tens of thousands of rows and a hundred
+            # megabytes of JSON — and took eighteen seconds to return a
+            # page of two hundred. The counts are now ``COUNT`` queries
+            # with the same filters, so the summary describes the whole
+            # result set while only the rows that are actually returned
+            # cross into the application.
+            summary = await summarise_audit_entries(
                 session,
                 sources=_split(source),
                 kinds=_split(kind),
@@ -1099,10 +1104,18 @@ async def search_audit(
                 text=q,
                 since=since,
                 until=until,
-                limit=1000,
             )
-            summary = await summarise_audit_entries(session, everything)
-            entries = everything[:limit]
+            entries = await read_audit_entries(
+                session,
+                sources=_split(source),
+                kinds=_split(kind),
+                statuses=_split(status),
+                entity_id=entity_id,
+                text=q,
+                since=since,
+                until=until,
+                limit=limit,
+            )
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

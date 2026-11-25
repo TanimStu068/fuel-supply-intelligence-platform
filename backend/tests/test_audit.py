@@ -16,7 +16,7 @@ from typing import Any, ClassVar
 
 import pytest
 
-from app.audit import read_audit_entries, summarise_audit_entries
+from app.audit import TRAILS, read_audit_entries, summarise_audit_entries
 from app.models import Alert, DomainEventRow, Recommendation
 
 
@@ -40,13 +40,26 @@ class _FakeSession:
     which source a query is for by looking at the table it names. That
     way the fake stays honest when only one of the three sources is
     requested — the query order is then not enough to tell.
+
+    The summary is a **database aggregate**, so the fake has to emulate
+    one: a ``COUNT`` query grouped by kind and status comes back as
+    ``(kind, status, count, oldest, newest)`` rows, not as the model's
+    own objects. The fake counts the rows it was given, which is what
+    Postgres would do.
     """
 
-    #: Which table belongs to which source.
+    #: Which table belongs to which row bucket.
     _TABLES: ClassVar[dict[str, str]] = {
         "recommendations": "decisions",
         "domain_events": "events",
         "alerts": "alerts",
+    }
+
+    #: Which row bucket belongs to which audit trail.
+    _TRAILS: ClassVar[dict[str, str]] = {
+        "decisions": "decision",
+        "events": "event",
+        "alerts": "alert",
     }
 
     def __init__(self) -> None:
@@ -59,10 +72,42 @@ class _FakeSession:
     async def execute(self, query: Any) -> _FakeResult:
         """Return the rows for the table the query names."""
         text = str(query)
-        for table, source in self._TABLES.items():
-            if table in text:
-                return _FakeResult(self._rows[source])
+        for table, bucket in self._TABLES.items():
+            if table not in text:
+                continue
+            rows = self._rows[bucket]
+            if "count" in text.lower():
+                return _FakeResult(self._aggregate(bucket, rows))
+            return _FakeResult(rows)
         return _FakeResult([])
+
+    @classmethod
+    def _aggregate(cls, bucket: str, rows: list[Any]) -> list[tuple[Any, ...]]:
+        """Emulate ``GROUP BY kind, status`` with a count and two moments.
+
+        The grouping is done on the *audit entry's* kind and status, not
+        on the model's columns, because the three trails name them
+        differently — a decision's kind is its risk level, an event's is
+        its type, and an alert's status is its severity.
+        """
+        trail = TRAILS[cls._TRAILS[bucket]]
+        groups: dict[tuple[Any, Any], list[Any]] = {}
+        for row in rows:
+            entry = trail.to_entry(row)
+            groups.setdefault((entry.kind, entry.status), []).append(entry)
+        aggregated = []
+        for (kind, status), group in groups.items():
+            moments = [entry.at for entry in group if entry.at is not None]
+            aggregated.append(
+                (
+                    kind,
+                    status,
+                    len(group),
+                    min(moments) if moments else None,
+                    max(moments) if moments else None,
+                )
+            )
+        return aggregated
 
     def queue(self, decisions: list[Any], events: list[Any], alerts: list[Any]) -> None:
         """Set the rows each of the three queries will return."""
@@ -318,6 +363,36 @@ async def test_the_summary_counts_the_facets(rows) -> None:
     assert summary["by_kind"]["WATCH"] == 1
     assert summary["newest"] is not None
     assert summary["oldest"] is not None
+
+
+async def test_the_summary_counts_every_row_and_not_only_the_page(rows) -> None:
+    """The count describes the whole result set, not the page.
+
+    A summary that reports the size of the page is worse than no summary
+    at all: it tells the operator there are three things to read when
+    there are three thousand. The counts are ``COUNT`` queries in the
+    database for exactly this reason.
+    """
+    rows["alerts"] = [
+        Alert(
+            id=100 + index,
+            created_at=now_ish() - timedelta(seconds=index),
+            kind="shortage_critical",
+            severity="critical",
+            entity_type="station",
+            entity_id="station-mirpur",
+            sim_tick=1,
+            message="shortage",
+            payload="{}",
+        )
+        for index in range(50)
+    ]
+    session = _FakeSession()
+    session.queue(rows["decisions"], rows["events"], rows["alerts"])
+    summary = await summarise_audit_entries(session)
+
+    assert summary["count"] == 53
+    assert summary["by_source"]["alert"] == 50
 
 
 async def test_an_empty_trail_returns_nothing() -> None:
