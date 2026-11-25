@@ -762,7 +762,7 @@ then `POST /admin/run`) and then measures the platform's own recovery —
 the cache was fresh again. The drill runs the procedure as a *fallback*,
 not as the expected path, and the report says which one happened.
 
-The procedure is now written down in the [README](../README.md) as well
+The procedure is now written down in the [README](../../README.md) as well
 as here, because it is also how you get a clean world between demo runs.
 
 ---
