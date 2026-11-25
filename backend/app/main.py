@@ -521,7 +521,15 @@ async def get_alerts(
     limit: int = Query(default=100, ge=1, le=1000),
     db: Database = Depends(get_database),
 ) -> dict[str, Any]:
-    """Return the platform-generated alerts, newest first."""
+    """Return the platform-generated alerts, newest first.
+
+    Only the columns the response actually carries are selected. The
+    alert's ``payload`` column holds the whole risk assessment as JSON
+    — about a kilobyte a row — and the response does not include it, so
+    loading it means the database sends it, the driver decodes it, and
+    the ORM builds an object for it, all to throw it away. The load
+    test measured that at 58 objects per request.
+    """
     from sqlalchemy import select
 
     from .models import Alert
@@ -529,9 +537,21 @@ async def get_alerts(
     try:
         async with db.session() as session:
             result = await session.execute(
-                select(Alert).order_by(Alert.created_at.desc()).limit(limit)
+                select(
+                    Alert.id,
+                    Alert.created_at,
+                    Alert.kind,
+                    Alert.severity,
+                    Alert.entity_type,
+                    Alert.entity_id,
+                    Alert.sim_tick,
+                    Alert.message,
+                    Alert.resolved,
+                )
+                .order_by(Alert.created_at.desc())
+                .limit(limit)
             )
-            rows = list(result.scalars())
+            rows = result.all()
     except Exception as exc:
         logger.warning("could not read alerts: %s", exc)
         raise HTTPException(
