@@ -705,7 +705,17 @@ async def run(args: argparse.Namespace) -> int:
             all_results.append(result)
             if result.stop_reason:
                 print(f"Stopped load testing: {result.stop_reason}")
-                break
+                if result.stack_was_unresponsive:
+                    # The stack is down. Nothing more can be measured.
+                    break
+                # A safety stop ends **this** scenario, not the whole
+                # sequence. The other two paths are different workloads
+                # with different costs, and stopping after the first one
+                # would leave two of the three unmeasured — which is not
+                # a result, it is an absence of one. The stack is given
+                # a moment to settle before the next scenario starts.
+                print("  Moving on to the next scenario.")
+                await asyncio.sleep(10)
 
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     raw_path = RESULTS_DIR / "part3-async.json"

@@ -881,8 +881,39 @@ class IntelligenceService:
             # The array is expanded **once**: writing ``jsonb_array_elements``
             # four times would produce four independent expansions that
             # Postgres cannot correlate, and it says so — "cannot extract
-            # elements from an object". The expansion is a lateral join, and
-            # each field is read out of the expanded element.
+            # elements from an object". The expansion is a **LATERAL**
+            # join, so each forecast row is paired with its own points,
+            # and each field is read out of the expanded element.
+            #
+            # A plain comma-join is not enough: SQLAlchemy renders it as
+            # a cartesian product, which Postgres warns about and which
+            # multiplies the row count by the number of points. LATERAL
+            # is what makes the join conditional on the row it is
+            # attached to.
+            #
+            # The array lives under ``payload->'points'`` — the payload is an
+            # object with the horizon inside it, not the horizon itself.
+            # Expanding the payload root is what Postgres refuses, because
+            # the root is an object and not an array.
+            # The array is expanded **once**: writing ``jsonb_array_elements``
+            # four times would produce four independent expansions that
+            # Postgres cannot correlate, and it says so — "cannot extract
+            # elements from an object". The expansion is a single set-
+            # returning function in the FROM clause, so each forecast row
+            # is paired with its own points — a lateral join, which is
+            # what the query plan shows.
+            #
+            # The array lives under ``payload->'points'`` — the payload is an
+            # object with the horizon inside it, not the horizon itself.
+            # Expanding the payload root is what Postgres refuses, because
+            # the root is an object and not an array.
+            points = func.jsonb_array_elements(
+                DemandForecast.payload.cast(JSONB).op("->")("points")
+            ).alias("point")
+            # The element is named literally rather than through the alias
+            # object: SQLAlchemy renames a repeated alias ("point" →
+            # "point_5") and qualifies its column ("point_5.jsonb_array_-
+            # elements_1"), and neither exists in the database.
             point_element = literal_column("point")
             point_rows = await session.execute(
                 select(
@@ -901,11 +932,7 @@ class IntelligenceService:
                     DemandForecast.sim_tick >= window_start,
                     DemandForecast.sim_tick < current_tick,
                 )
-                .select_from(
-                    DemandForecast,
-                    func.jsonb_array_elements(DemandForecast.payload.cast(JSONB)).alias("point"),
-                )
-                .correlate(DemandForecast)
+                .select_from(DemandForecast, points)
             )
 
             expanded_rows = point_rows.all()
