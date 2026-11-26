@@ -111,6 +111,17 @@ every grid stacks into a single column.
 
 **Day 1** — the foundation: the simulator client and the first API routes.
 
+### Poridhi Playground deployment recording
+
+The recording shows the project running in Poridhi Playground:
+
+<video controls preload="metadata" width="100%">
+  <source src="https://raw.githubusercontent.com/TanimStu068/fuel-supply-intelligence-platform/main/docs/poridhi_project_fuel_screenrecord.webm" type="video/webm">
+  Your browser does not support embedded video. [Open the recording](docs/poridhi_project_fuel_screenrecord.webm).
+</video>
+
+[Open or download the WebM recording](docs/poridhi_project_fuel_screenrecord.webm).
+
 ---
 
 ## 3. Architecture
@@ -375,11 +386,12 @@ All configuration is environment-driven; **no secret is hard-coded**. Copy
 | `CORS_ALLOWED_ORIGINS` | `http://localhost:5173,…` | Origins the browser may call from |
 | `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | `fuel` / *change-me* / `fuel` | Database credentials |
 
-The frontend's API address is **runtime** configuration, not build-time: Vite
-inlines `import.meta.env` at build time, so a value baked into the image could
-not be changed without a rebuild. The container's entrypoint rewrites
-`dist/config.js` from `API_BASE_URL` at start-up, so one image works against
-any backend address.
+The frontend resolves its API address in this order: runtime `API_BASE_URL`
+from `dist/config.js`, build-time `VITE_API_BASE_URL`, then same-origin. The
+container entrypoint writes `dist/config.js` at start-up; changing the
+build-time fallback requires rebuilding the image. When deploying behind a
+proxy or CDN, verify the public `config.js` response: an intermediary may serve
+a cached value even when the container has the correct runtime setting.
 
 ---
 
@@ -582,6 +594,30 @@ simulator and Postgres, and a `docker compose config` validation.
 See the [deployment guide](docs/deployment.md) for publishing and post-deploy
 checks, and the [CI/CD, release, and rollback guide](docs/cicd-release-and-rollback.md)
 for the release workflow and rollback procedure.
+
+### Poridhi Playground deployment
+
+The project was deployed to Poridhi Playground and exposed through its Load
+Balancer. These links are tied to the lab session and may stop working when
+that session expires:
+
+| Service | Link |
+|---|---|
+| Frontend dashboard | [Open the dashboard](https://6a6cda37950c784444425305-b649df7f.lb.poridhi.io/) |
+| Backend API | [Open the API](https://6a6cda37950c784444425305-169a2f29.lb.poridhi.io/) |
+
+#### Issues encountered and resolutions
+
+| Issue | What happened and how it was resolved |
+|---|---|
+| `nano` was unavailable in the lab | The lab image did not include `nano`; Python scripts were used to update `.env` and deployment configuration without displaying the database password. |
+| Choosing the Load Balancer target IP | The VM showed several addresses. The lab's `wt0` address (`100.80.165.76` for this session) was used; `172.*` addresses belonged to Docker bridge networks. Use the current lab's `wt0` address, not this session's address, in a future deployment. |
+| Frontend and backend have separate public URLs | Opening the backend URL showed the API response, not the dashboard. Separate Load Balancer mappings were created for frontend port `5173` and backend port `8001`. |
+| Frontend initially tried `localhost:8001` | In a visitor's browser, `localhost` refers to that visitor's own device. `API_BASE_URL` was set to the public backend URL, and the frontend was rebuilt with `VITE_API_BASE_URL` as a build-time fallback. |
+| CORS needed the public frontend origin | The backend's `CORS_ALLOWED_ORIGINS` was set to the frontend origin, without a path. A request using that `Origin` returned HTTP 200 and the matching `access-control-allow-origin` header. |
+| The `/control` path did not serve frontend config | During an earlier attempt, the Load Balancer returned 404 for `/control/config.js`; changing the Vite base path did not resolve it. In the successful deployment, the frontend was exposed at the root URL and `/config.js` returned HTTP 200. |
+| Cloudflare served stale frontend configuration | Although the running frontend container had the correct backend URL, the public `/config.js` response contained `http://localhost:8001` and showed `cf-cache-status: HIT`. Adding a unique query string to the script URL bypassed the stale cached response. |
+| Healthy containers did not prove the public UI worked | Compose health checks and local port checks passed while the browser still could not reach the API. Public URL checks, including the actual `/config.js` response and CORS headers, were needed to find the issue. |
 
 ## 13. The demo
 

@@ -246,6 +246,7 @@ anyone who prefers that.
 | **Where** | [`docs/demo-script.md`](demo-script.md) |
 | **Proves it** | [`scripts/demo_dry_run.sh`](../scripts/demo_dry_run.sh) — the fourteen steps, executed and checked |
 | **Reset** | [`scripts/reset_demo.sh`](../scripts/reset_demo.sh) — the world back to a known state in seconds |
+| **Deployment evidence** | [`docs/poridhi_project_fuel_screenrecord.webm`](poridhi_project_fuel_screenrecord.webm) — screen recording of the project running in Poridhi Playground |
 
 **Status: done.** The script follows the brief's fourteen-step story
 exactly: normal operations → dashboard → demand rising → risk detected →
