@@ -51,6 +51,13 @@ a run that is reproducible with the script named in it.
 |---|---|
 | [`requirements-traceability.md`](requirements-traceability.md) | Every requirement in the two organizer documents, mapped to the code that implements it and the evidence that proves it — with a **Done / Partial / Not done** status on each one, and a gaps list at the end. |
 
+## The short version
+
+| Document | What it holds |
+|---|---|
+| [`project-summary.md`](project-summary.md) | One page: the problem, what was built, the architecture in five lines, six headline results with real numbers, what makes it resilient, and the honest limitations |
+| [`demo-qa.md`](demo-qa.md) | Twenty-five questions judges are likely to ask, with short factual answers, each linking to the evidence file |
+
 ## The project
 
 | Document | What it holds |
@@ -74,7 +81,10 @@ a run that is reproducible with the script named in it.
 ## Reading order
 
 * **A judge with ninety seconds** — the [root README](../README.md), then
+  [`project-summary.md`](project-summary.md) for the one-page version, then
   [`resilience-report.md`](resilience-report.md) and the screenshots.
+* **A judge preparing questions** — [`demo-qa.md`](demo-qa.md) has
+  twenty-five of them answered, each with a link to the evidence.
 * **A reviewer checking the claims** — [`requirements-traceability.md`](requirements-traceability.md)
   first, because it maps every requirement to its proof and marks what is
   not done. Then [`bug-catalog.md`](bug-catalog.md), which names what is
