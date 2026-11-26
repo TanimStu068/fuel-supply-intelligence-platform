@@ -115,12 +115,7 @@ every grid stacks into a single column.
 
 The recording shows the project running in Poridhi Playground:
 
-<video controls preload="metadata" width="100%">
-  <source src="https://raw.githubusercontent.com/TanimStu068/fuel-supply-intelligence-platform/main/docs/poridhi_project_fuel_screenrecord.webm" type="video/webm">
-  Your browser does not support embedded video. [Open the recording](docs/poridhi_project_fuel_screenrecord.webm).
-</video>
-
-[Open or download the WebM recording](docs/poridhi_project_fuel_screenrecord.webm).
+![](https://github.com/user-attachments/assets/e18dfe12-ae4a-4c61-8948-f6d95b94a387)
 
 ---
 
