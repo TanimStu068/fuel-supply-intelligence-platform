@@ -72,6 +72,7 @@ a run that is reproducible with the script named in it.
 | Document | What it holds |
 |---|---|
 | [`architecture.md`](architecture.md) | The system diagram, the assumptions, the data sources, the security notes, the limitations |
+| [`data-model.md`](data-model.md) | Every one of the **twelve** tables with its columns, keys, indexes and purpose; the entity-relationship diagram; the ten de-duplication keys; which tables are actually written versus write-only; the three Alembic migrations; and the retention gaps |
 | [`deployment.md`](deployment.md) | Publishing, rollback, and the post-deploy checks |
 | [`demo-script.md`](demo-script.md) | The fourteen demo steps, with the exact command or click for each one and what to say while doing it |
 | [`deliverables-checklist.md`](deliverables-checklist.md) | Every required deliverable mapped to the file or screen that proves it |
