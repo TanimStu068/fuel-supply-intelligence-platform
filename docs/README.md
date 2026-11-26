@@ -58,6 +58,12 @@ a run that is reproducible with the script named in it.
 | [`project-summary.md`](project-summary.md) | One page: the problem, what was built, the architecture in five lines, six headline results with real numbers, what makes it resilient, and the honest limitations |
 | [`demo-qa.md`](demo-qa.md) | Twenty-five questions judges are likely to ask, with short factual answers, each linking to the evidence file |
 
+## The decisions
+
+| Document | What it holds |
+|---|---|
+| [`adr/`](adr/) | **Thirteen** Architecture Decision Records — the stack, REST as source of truth, the polling floor, human approval, the hybrid forecast, the model gate, idempotency keys, in-SQL aggregation, node-exporter, compose profiles, the decision not to use Loki, the decision not to use RL, and the working-set split. Each states the context, the alternatives rejected and what the decision cost. Start at [`adr/README.md`](adr/README.md). |
+
 ## The project
 
 | Document | What it holds |
