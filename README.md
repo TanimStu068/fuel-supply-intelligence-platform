@@ -37,6 +37,7 @@ Table of contents
 15. [Required deliverables map](#15-required-deliverables-map)
 16. [Reference material](#16-reference-material)
 17. [Rules we hold ourselves to](#17-rules-we-hold-ourselves-to)
+18. [Documentation](#documentation)
 
 ---
 
@@ -576,6 +577,18 @@ end-to-end tests against the whole stack brought up with `docker compose up -d
 --wait`, Docker image builds with a live backend health check against a real
 simulator and Postgres, and a `docker compose config` validation.
 
+## 12. Deployment and rollback
+
+See the [deployment guide](docs/deployment.md) for publishing and post-deploy
+checks, and the [CI/CD, release, and rollback guide](docs/cicd-release-and-rollback.md)
+for the release workflow and rollback procedure.
+
+## 13. The demo
+
+The [demo script](docs/demo-script.md) documents the walkthrough and operator
+actions. The [Day 7 progress report](docs/progress/day7.md) records the release
+and demo verification.
+
 ---
 
 ## 14. 7-day build plan
@@ -799,6 +812,17 @@ Never cut: the load test, the resilience report, or the fresh-clone test.
 * Clearly distinguish simulated results from real-world fuel conditions — every
   recommendation carries a **"Simulated environment. Human review required."**
   banner.
+
+## Documentation
+
+The [documentation index](docs/README.md) lists the project documents and
+supporting evidence. Start with:
+
+- [Project summary](docs/project-summary.md) — scope, reported results, and limitations.
+- [Architecture](docs/architecture.md) — system components and data flow.
+- [API reference](docs/api-reference.md) — backend routes and response contracts.
+- [Runbook](docs/runbook.md) — operational procedures and incident responses.
+- [Testing strategy and report](docs/testing-strategy-and-report.md) — test evidence and known gaps.
 
 ---
 
