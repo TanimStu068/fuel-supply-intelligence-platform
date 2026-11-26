@@ -75,6 +75,7 @@ a run that is reproducible with the script named in it.
 | [`data-model.md`](data-model.md) | Every one of the **twelve** tables with its columns, keys, indexes and purpose; the entity-relationship diagram; the ten de-duplication keys; which tables are actually written versus write-only; the three Alembic migrations; and the retention gaps |
 | [`deployment.md`](deployment.md) | Publishing, rollback, and the post-deploy checks |
 | [`runbook.md`](runbook.md) | **Operating the platform** — starting and stopping the core and monitoring profiles, the health checks, a clean reset, the simulator's connection-pool procedure, degraded mode, the ML kill-switch, a database outage, a backend crash, memory pressure on a 7 GB host, and all **twenty-one** Prometheus alerts mapped to their meaning, likely cause and action |
+| [`observability-guide.md`](observability-guide.md) | **What the platform measures** — a catalog of all **forty-six** Prometheus metrics with their types, labels and meanings; the **five** dashboards and the question each answers; all **twenty-one** alert rules with their condition, window, severity and what to do; the structured log format and its correlation IDs; how to search `GET /api/audit` and `scripts/search_logs.py`; and the resource budget per container |
 | [`demo-script.md`](demo-script.md) | The fourteen demo steps, with the exact command or click for each one and what to say while doing it |
 | [`deliverables-checklist.md`](deliverables-checklist.md) | Every required deliverable mapped to the file or screen that proves it |
 
@@ -108,6 +109,9 @@ a run that is reproducible with the script named in it.
   that matches what you are changing.
 * **Someone running the platform** — [`runbook.md`](runbook.md), for the
   commands, the health checks and what to do when a dependency fails.
+* **Someone reviewing the instrumentation** —
+  [`observability-guide.md`](observability-guide.md), for every metric,
+  every dashboard, every alert rule, the log format and the budget.
 
 ## Rules for these documents
 
