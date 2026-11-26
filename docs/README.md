@@ -72,6 +72,7 @@ a run that is reproducible with the script named in it.
 | Document | What it holds |
 |---|---|
 | [`architecture.md`](architecture.md) | The system diagram, the assumptions, the data sources, the security notes, the limitations |
+| [`security-and-threat-model.md`](security-and-threat-model.md) | **The security and threat model** — the assets, the five trust boundaries, the controls that exist (each verified in the code), a twenty-row threat table with impact, mitigation and residual risk, and an honest list of what is **not** protected: no authentication, no authorization, no TLS, no rate limiting, no security headers |
 | [`data-model.md`](data-model.md) | Every one of the **twelve** tables with its columns, keys, indexes and purpose; the entity-relationship diagram; the ten de-duplication keys; which tables are actually written versus write-only; the three Alembic migrations; and the retention gaps |
 | [`deployment.md`](deployment.md) | Publishing, rollback, and the post-deploy checks |
 | [`runbook.md`](runbook.md) | **Operating the platform** — starting and stopping the core and monitoring profiles, the health checks, a clean reset, the simulator's connection-pool procedure, degraded mode, the ML kill-switch, a database outage, a backend crash, memory pressure on a 7 GB host, and all **twenty-one** Prometheus alerts mapped to their meaning, likely cause and action |
