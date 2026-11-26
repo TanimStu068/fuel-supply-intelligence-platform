@@ -24,6 +24,10 @@ that were hoped for.
 | 6 | [`progress/day6.md`](progress/day6.md) | Resilience, observability, the crisis drills and the load test (in three parts) |
 | 7 | [`progress/day7.md`](progress/day7.md) | The release, the self-checking demo, the fresh-clone test |
 
+Read as a story rather than a log: [`project-journey.md`](project-journey.md)
+narrates the seven days — the goal, what was built, the numbers, the bugs and
+the decisions of each day — and ends with the lessons learned.
+
 ## The evidence
 
 Measured against the running stack. Every number in these documents came from
@@ -63,6 +67,7 @@ a run that is reproducible with the script named in it.
 |---|---|
 | [`project-summary.md`](project-summary.md) | One page: the problem, what was built, the architecture in five lines, six headline results with real numbers, what makes it resilient, and the honest limitations |
 | [`demo-qa.md`](demo-qa.md) | Twenty-five questions judges are likely to ask, with short factual answers, each linking to the evidence file |
+| [`project-journey.md`](project-journey.md) | **The build log as a narrative** — Days 1 to 7 day by day: the goal, what was built, the key numbers, the bugs found and the decisions taken — followed by **seven lessons learned** on verifying against live behaviour, silent failures, measurement honesty and resource budgeting |
 
 ## Operating it
 
@@ -106,6 +111,9 @@ a run that is reproducible with the script named in it.
 * **A judge with ninety seconds** — the [root README](../README.md), then
   [`project-summary.md`](project-summary.md) for the one-page version, then
   [`resilience-report.md`](resilience-report.md) and the screenshots.
+* **A judge wanting the story of the build** —
+  [`project-journey.md`](project-journey.md) for the seven days as a
+  narrative, then the [progress log](#the-build-log) for the raw record.
 * **A judge preparing questions** — [`demo-qa.md`](demo-qa.md) has
   twenty-five of them answered, each with a link to the evidence.
 * **A reviewer checking the claims** — [`requirements-traceability.md`](requirements-traceability.md)
