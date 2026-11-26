@@ -781,6 +781,10 @@ Never cut: the load test, the resilience report, or the fresh-clone test.
 * `docs/reference/extracted/` — plain-text extracts and a read-only copy of the
   simulator's own source, used to verify the contract
 * [`docs/README.md`](docs/README.md) — the index of everything in `docs/`
+* [`docs/glossary.md`](docs/glossary.md) — the vocabulary: the simulator's terms, the platform's terms, and the evidence terms
+* [`CHANGELOG.md`](CHANGELOG.md) — every release and every daily milestone
+* [`CONTRIBUTING.md`](CONTRIBUTING.md) — setup, branching, commit style, tests, lint, and the checks CI runs
+* [`SECURITY.md`](SECURITY.md) — what the platform protects, what it does not, and how to report an issue
 
 ---
 

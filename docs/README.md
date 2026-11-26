@@ -99,6 +99,7 @@ a run that is reproducible with the script named in it.
 
 | Path | What it holds |
 |---|---|
+| [`glossary.md`](glossary.md) | **The vocabulary** — the simulator's domain terms (tick, depot, station, route, allocation, supply arrival), the terms this platform adds (days of cover, risk level, idempotency key, fallback, kill-switch, degraded, stale, supply ceiling, service level), and the evidence terms — each linked to the code that implements it |
 | [`reference/`](reference/) | The organizer's integration guide and the participant brief (PDF), plus the plain-text extracts and a read-only copy of the simulator's own source |
 | [`screenshots/`](screenshots/) | The dashboard screens, captured by `frontend/e2e/screenshots.spec.ts` |
 | [`assets/`](assets/) | Rendered diagrams |
