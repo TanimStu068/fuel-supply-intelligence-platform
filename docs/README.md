@@ -81,6 +81,7 @@ This index covers the documents and supporting evidence in `docs/`.
 - [`screenshots/resilience/grafana-fuel-integration.png`](screenshots/resilience/grafana-fuel-integration.png) — Grafana integration dashboard.
 - [`screenshots/resilience/grafana-fuel-intelligence.png`](screenshots/resilience/grafana-fuel-intelligence.png) — Grafana intelligence dashboard.
 - [`screenshots/resilience/grafana-fuel-system.png`](screenshots/resilience/grafana-fuel-system.png) — Grafana system dashboard.
+- [`poridhi_project_fuel_screenrecord.gif`](poridhi_project_fuel_screenrecord.gif) — optimized animated preview embedded in the root README.
 - [`poridhi_project_fuel_screenrecord.webm`](poridhi_project_fuel_screenrecord.webm) — screen recording of the project deployed in Poridhi Playground.
 
 ## Project story

@@ -115,7 +115,7 @@ every grid stacks into a single column.
 
 The recording shows the project running in Poridhi Playground:
 
-![](https://github.com/user-attachments/assets/e18dfe12-ae4a-4c61-8948-f6d95b94a387)
+![Animated preview of the Poridhi Playground deployment](docs/poridhi_project_fuel_screenrecord.gif)
 
 ---
 
