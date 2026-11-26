@@ -34,6 +34,7 @@ a run that is reproducible with the script named in it.
 | [`resilience-report.md`](resilience-report.md) | **17 of 17** crisis, fault and dependency scenarios, each with a detection time, a recovery time and the recommendation made during the incident |
 | [`load-test-report.md`](load-test-report.md) | Three workloads at a 50-user ramp, the before/after of the prediction-error aggregate, and the deadlock that lost writes |
 | [`model-evaluation.md`](model-evaluation.md) | The forecast accuracy, the two error measures, the horizon benchmark, and the model's own honest verdict |
+| [`intelligence-methodology.md`](intelligence-methodology.md) | **The model card** — inputs and data sources, the profile baseline formula, the learned model and its twelve features, confidence intervals, the risk thresholds, anomaly and bottleneck detection, the fallback and the `needs_human_review` rule, retraining, the evaluation method including the leakage fix, why the 34 % / 26.5 % / 3.7 % figures differ, the supply ceiling, and the limitations |
 | [`policy-comparison.md`](policy-comparison.md) | The platform's policy against a naive baseline, on service level |
 | [`fault-tests.md`](fault-tests.md) | The fault matrix, the degraded-mode drill, and eight findings about the simulator's fault behaviour |
 | [`simulator-notes.md`](simulator-notes.md) | What the running simulator actually does, and the **ten** places it disagrees with the guide |
