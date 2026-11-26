@@ -780,6 +780,7 @@ Never cut: the load test, the resilience report, or the fresh-clone test.
 * [`docs/reference/BUP_CSE_FEST_2026_Participant_Facing_Hackathon_Draft.pdf`](docs/reference/BUP_CSE_FEST_2026_Participant_Facing_Hackathon_Draft.pdf) — the brief and the deliverables
 * `docs/reference/extracted/` — plain-text extracts and a read-only copy of the
   simulator's own source, used to verify the contract
+* [`docs/README.md`](docs/README.md) — the index of everything in `docs/`
 
 ---
 

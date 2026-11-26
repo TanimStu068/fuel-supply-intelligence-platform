@@ -1,0 +1,85 @@
+# Documentation index
+
+Everything the project documents, and what each document is for.
+
+The project's front door is the [root README](../README.md) — what it is, how to
+run it, every endpoint, the rules it holds itself to. This page indexes the
+`docs/` tree.
+
+---
+
+## The build log
+
+The seven-day log, one file per day. Each file records what was built, what
+the verification caught, and the numbers that were measured — not the numbers
+that were hoped for.
+
+| Day | File | What it covers |
+|---|---|---|
+| 1 | [`progress/day1.md`](progress/day1.md) | The running skeleton, the simulator client, the first discrepancies |
+| 2 | [`progress/day2.md`](progress/day2.md) | Postgres + Alembic, the sync service, SSE, the degraded contract, metrics |
+| 3 | [`progress/day3.md`](progress/day3.md) | The intelligence layer — forecasting, shortage risk, anomaly detection, the dispatcher |
+| 4 | [`progress/day4.md`](progress/day4.md) | The decision engine — the validator, the optimizer, human approval, the fallback |
+| 5 | [`progress/day5.md`](progress/day5.md) | The operator dashboard — nine screens, the decision drawer, the crisis console |
+| 6 | [`progress/day6.md`](progress/day6.md) | Resilience, observability, the crisis drills and the load test (in three parts) |
+| 7 | [`progress/day7.md`](progress/day7.md) | The release, the self-checking demo, the fresh-clone test |
+
+## The evidence
+
+Measured against the running stack. Every number in these documents came from
+a run that is reproducible with the script named in it.
+
+| Document | What it holds |
+|---|---|
+| [`resilience-report.md`](resilience-report.md) | **17 of 17** crisis, fault and dependency scenarios, each with a detection time, a recovery time and the recommendation made during the incident |
+| [`load-test-report.md`](load-test-report.md) | Three workloads at a 50-user ramp, the before/after of the prediction-error aggregate, and the deadlock that lost writes |
+| [`model-evaluation.md`](model-evaluation.md) | The forecast accuracy, the two error measures, the horizon benchmark, and the model's own honest verdict |
+| [`policy-comparison.md`](policy-comparison.md) | The platform's policy against a naive baseline, on service level |
+| [`fault-tests.md`](fault-tests.md) | The fault matrix, the degraded-mode drill, and eight findings about the simulator's fault behaviour |
+| [`simulator-notes.md`](simulator-notes.md) | What the running simulator actually does, and the **ten** places it disagrees with the guide |
+
+## The defects
+
+| Document | What it holds |
+|---|---|
+| [`bug-catalog.md`](bug-catalog.md) | Every defect found during the project — **70** of them — with the day, the symptom, the root cause, how it was found, the fix, and the test that pins it. Grouped by root-cause pattern, with eight deep dives and a count per day and per component. |
+
+## The project
+
+| Document | What it holds |
+|---|---|
+| [`architecture.md`](architecture.md) | The system diagram, the assumptions, the data sources, the security notes, the limitations |
+| [`deployment.md`](deployment.md) | Publishing, rollback, and the post-deploy checks |
+| [`demo-script.md`](demo-script.md) | The fourteen demo steps, with the exact command or click for each one and what to say while doing it |
+| [`deliverables-checklist.md`](deliverables-checklist.md) | Every required deliverable mapped to the file or screen that proves it |
+
+## Reference
+
+| Path | What it holds |
+|---|---|
+| [`reference/`](reference/) | The organizer's integration guide and the participant brief (PDF), plus the plain-text extracts and a read-only copy of the simulator's own source |
+| [`screenshots/`](screenshots/) | The dashboard screens, captured by `frontend/e2e/screenshots.spec.ts` |
+| [`assets/`](assets/) | Rendered diagrams |
+| [`host-tuning/`](host-tuning/) | The host memory and CPU budget this machine can afford, and the compose profiles that enforce it |
+
+---
+
+## Reading order
+
+* **A judge with ninety seconds** — the [root README](../README.md), then
+  [`resilience-report.md`](resilience-report.md) and the screenshots.
+* **A reviewer checking the claims** — [`bug-catalog.md`](bug-catalog.md)
+  first, because it names what is broken and what is pinned. Then
+  [`model-evaluation.md`](model-evaluation.md) for the model's honest verdict.
+* **Someone joining the project** — [`architecture.md`](architecture.md), then
+  the [root README's quick start](../README.md#7-quick-start), then the day
+  that matches what you are changing.
+
+## Rules for these documents
+
+* Every number comes from a run that the named script reproduces. Nothing is
+  estimated, and nothing is rounded in the platform's favour.
+* Where two documents disagree, the newer verified value wins and the conflict
+  is listed in the **Discrepancies** section of the document.
+* Where something was not verified, the document says **not verified** rather
+  than leaving a gap.
