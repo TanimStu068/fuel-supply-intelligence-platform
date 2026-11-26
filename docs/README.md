@@ -40,6 +40,7 @@ a run that is reproducible with the script named in it.
 | [`policy-comparison.md`](policy-comparison.md) | The platform's policy against a naive baseline, on service level |
 | [`fault-tests.md`](fault-tests.md) | The fault matrix, the degraded-mode drill, and eight findings about the simulator's fault behaviour |
 | [`simulator-notes.md`](simulator-notes.md) | What the running simulator actually does, and the **ten** places it disagrees with the guide |
+| [`testing-strategy-and-report.md`](testing-strategy-and-report.md) | **The testing strategy and report** — the eight test layers and what each one proves, the counts (**583** backend, **22** Vitest, **12** Playwright) reconciled from the test files themselves, the **84.4 %** coverage against its seven enforced per-module floors, the two flaky tests that were found and fixed, why the on-disk verification scripts exist after the silent edit reverts, and **twelve** known gaps |
 
 ## The defects
 
