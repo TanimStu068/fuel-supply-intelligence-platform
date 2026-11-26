@@ -53,6 +53,10 @@ This index covers the documents and supporting evidence in `docs/`.
 
 ## Quality and evidence
 
+- [`01-judging-evidence.pdf`](01-judging-evidence.pdf) — compiled judging evidence and project summary.
+- [`02-technical-reference.pdf`](02-technical-reference.pdf) — compiled architecture decisions, intelligence, decision engine, API, and data model.
+- [`03-operations-and-quality.pdf`](03-operations-and-quality.pdf) — compiled operating, observability, security, testing, release, and configuration references.
+- [`04-story-and-repo-hygiene.pdf`](04-story-and-repo-hygiene.pdf) — compiled limitations, user guide, project story, and repository hygiene documents.
 - [`requirements-traceability.md`](requirements-traceability.md) — requirements mapped to implementation and evidence.
 - [`testing-strategy-and-report.md`](testing-strategy-and-report.md) — test layers, results, coverage, and known gaps.
 - [`fault-tests.md`](fault-tests.md) — fault-test matrix and observed findings.
@@ -112,3 +116,12 @@ This index covers the documents and supporting evidence in `docs/`.
 - [`reference/extracted/simulator_src/models.py`](reference/extracted/simulator_src/models.py) — extracted simulator data models.
 - [`reference/extracted/simulator_src/scenario.py`](reference/extracted/simulator_src/scenario.py) — extracted simulator scenario source.
 - [`reference/extracted/simulator_src/schemas.py`](reference/extracted/simulator_src/schemas.py) — extracted simulator schemas.
+
+## Rebuilding the PDFs
+
+From the repository root, run `python scripts/build_pdfs.py`. The script uses
+the installed Python `markdown-it-py` and Pillow packages, headless Chrome,
+and Poppler's `pdftotext`; it processes one PDF at a time, splits tall
+screenshots into legible page-sized sections, and places the four outputs in
+`docs/`. Missing source files are skipped and reported. Mermaid blocks remain
+readable source listings when no local Mermaid renderer is installed.
