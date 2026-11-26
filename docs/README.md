@@ -74,6 +74,7 @@ a run that is reproducible with the script named in it.
 | [`architecture.md`](architecture.md) | The system diagram, the assumptions, the data sources, the security notes, the limitations |
 | [`data-model.md`](data-model.md) | Every one of the **twelve** tables with its columns, keys, indexes and purpose; the entity-relationship diagram; the ten de-duplication keys; which tables are actually written versus write-only; the three Alembic migrations; and the retention gaps |
 | [`deployment.md`](deployment.md) | Publishing, rollback, and the post-deploy checks |
+| [`runbook.md`](runbook.md) | **Operating the platform** — starting and stopping the core and monitoring profiles, the health checks, a clean reset, the simulator's connection-pool procedure, degraded mode, the ML kill-switch, a database outage, a backend crash, memory pressure on a 7 GB host, and all **twenty-one** Prometheus alerts mapped to their meaning, likely cause and action |
 | [`demo-script.md`](demo-script.md) | The fourteen demo steps, with the exact command or click for each one and what to say while doing it |
 | [`deliverables-checklist.md`](deliverables-checklist.md) | Every required deliverable mapped to the file or screen that proves it |
 
@@ -105,6 +106,8 @@ a run that is reproducible with the script named in it.
 * **Someone joining the project** — [`architecture.md`](architecture.md), then
   the [root README's quick start](../README.md#7-quick-start), then the day
   that matches what you are changing.
+* **Someone running the platform** — [`runbook.md`](runbook.md), for the
+  commands, the health checks and what to do when a dependency fails.
 
 ## Rules for these documents
 
