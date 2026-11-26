@@ -49,6 +49,7 @@ a run that is reproducible with the script named in it.
 |---|---|
 | [`bug-catalog.md`](bug-catalog.md) | Every defect found during the project — **70** of them — with the day, the symptom, the root cause, how it was found, the fix, and the test that pins it. Grouped by root-cause pattern, with eight deep dives and a count per day and per component. |
 | [`postmortems/`](postmortems/) | Eight incidents written up in full — summary, impact, timeline, root cause, how it was detected, resolution, what went well, what went badly, and action items marked done or not done. Start at [`postmortems/README.md`](postmortems/README.md). |
+| [`known-limitations-and-roadmap.md`](known-limitations-and-roadmap.md) | **Every known limitation in one place** — the 25 % supply shortfall, the model's modest advantage, the unbounded `prediction_evaluations`, the simulator's fragile connection pool, the load runs stopped at the CPU guard, the single-tenant and no-authentication positions, and the polling latency floor — each with its impact and its workaround, followed by a prioritized roadmap of **fourteen** items marked as future work |
 
 ## The requirements
 
@@ -107,7 +108,9 @@ a run that is reproducible with the script named in it.
   broken and what is pinned, and
   [`model-evaluation.md`](model-evaluation.md) for the model's honest verdict.
   Then [`postmortems/`](postmortems/) for the eight incidents written up in
-  full.
+  full. Then [`known-limitations-and-roadmap.md`](known-limitations-and-roadmap.md),
+  which collects every limitation with its impact and its workaround, and
+  says what is still to be built.
 * **Someone joining the project** — [`architecture.md`](architecture.md), then
   the [root README's quick start](../README.md#7-quick-start), then the day
   that matches what you are changing.
