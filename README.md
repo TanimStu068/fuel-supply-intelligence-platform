@@ -824,6 +824,13 @@ supporting evidence. Start with:
 - [Runbook](docs/runbook.md) — operational procedures and incident responses.
 - [Testing strategy and report](docs/testing-strategy-and-report.md) — test evidence and known gaps.
 
+### PDF documents
+
+- [Judging Evidence](docs/01-judging-evidence.pdf)
+- [Technical Reference](docs/02-technical-reference.pdf)
+- [Operations and Quality](docs/03-operations-and-quality.pdf)
+- [Story and Repo Hygiene](docs/04-story-and-repo-hygiene.pdf)
+
 ---
 
 <div align="center">
