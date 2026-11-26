@@ -45,6 +45,12 @@ a run that is reproducible with the script named in it.
 | [`bug-catalog.md`](bug-catalog.md) | Every defect found during the project — **70** of them — with the day, the symptom, the root cause, how it was found, the fix, and the test that pins it. Grouped by root-cause pattern, with eight deep dives and a count per day and per component. |
 | [`postmortems/`](postmortems/) | Eight incidents written up in full — summary, impact, timeline, root cause, how it was detected, resolution, what went well, what went badly, and action items marked done or not done. Start at [`postmortems/README.md`](postmortems/README.md). |
 
+## The requirements
+
+| Document | What it holds |
+|---|---|
+| [`requirements-traceability.md`](requirements-traceability.md) | Every requirement in the two organizer documents, mapped to the code that implements it and the evidence that proves it — with a **Done / Partial / Not done** status on each one, and a gaps list at the end. |
+
 ## The project
 
 | Document | What it holds |
@@ -69,10 +75,12 @@ a run that is reproducible with the script named in it.
 
 * **A judge with ninety seconds** — the [root README](../README.md), then
   [`resilience-report.md`](resilience-report.md) and the screenshots.
-* **A reviewer checking the claims** — [`bug-catalog.md`](bug-catalog.md)
-  first, because it names what is broken and what is pinned. Then
-  [`model-evaluation.md`](model-evaluation.md) for the model's honest verdict,
-  then [`postmortems/`](postmortems/) for the eight incidents written up in
+* **A reviewer checking the claims** — [`requirements-traceability.md`](requirements-traceability.md)
+  first, because it maps every requirement to its proof and marks what is
+  not done. Then [`bug-catalog.md`](bug-catalog.md), which names what is
+  broken and what is pinned, and
+  [`model-evaluation.md`](model-evaluation.md) for the model's honest verdict.
+  Then [`postmortems/`](postmortems/) for the eight incidents written up in
   full.
 * **Someone joining the project** — [`architecture.md`](architecture.md), then
   the [root README's quick start](../README.md#7-quick-start), then the day
