@@ -64,6 +64,12 @@ a run that is reproducible with the script named in it.
 | [`project-summary.md`](project-summary.md) | One page: the problem, what was built, the architecture in five lines, six headline results with real numbers, what makes it resilient, and the honest limitations |
 | [`demo-qa.md`](demo-qa.md) | Twenty-five questions judges are likely to ask, with short factual answers, each linking to the evidence file |
 
+## Operating it
+
+| Document | What it holds |
+|---|---|
+| [`operator-user-guide.md`](operator-user-guide.md) | **The dashboard, screen by screen** — one section per screen (Overview, Network, Inventory, Risk & alerts, Recommendations, Supply & events, Decision history, Service health, Simulation), how to read a risk level, the eight constraints checked, how to approve or reject, what the `DEGRADED`, `STALE` and `FALLBACK` banners mean, the common tasks, and what the dashboard does not do. With the eleven screenshots the project's own Playwright test captures. |
+
 ## The decisions
 
 | Document | What it holds |
@@ -116,6 +122,12 @@ a run that is reproducible with the script named in it.
   that matches what you are changing.
 * **Someone running the platform** — [`runbook.md`](runbook.md), for the
   commands, the health checks and what to do when a dependency fails.
+  [`operator-user-guide.md`](operator-user-guide.md) for the dashboard itself:
+  what each screen shows and how to act on it.
+* **Someone operating the dashboard** —
+  [`operator-user-guide.md`](operator-user-guide.md) first, screen by screen,
+  then [`demo-script.md`](demo-script.md) for the same screens in a story
+  order.
 * **Someone reviewing the instrumentation** —
   [`observability-guide.md`](observability-guide.md), for every metric,
   every dashboard, every alert rule, the log format and the budget.
